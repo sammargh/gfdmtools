@@ -7,6 +7,8 @@ import os
 from PIL import Image, ImageChops
 import tim2png
 
+import imageops
+
 def parse_obj(filename):
     found_ids = []
     filenames = []
@@ -466,8 +468,8 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
                 # if k < 2274 or k > 2274:
                 #     continue
 
-                # if k < 6599 or k > 6650:
-                #     continue
+                if k < 0 or k > 200:
+                    continue
 
                 print()
                 print()
@@ -541,17 +543,19 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
 
                     if 'blend_mode' in render_by_timestamp[k][k2]:
                         if render_by_timestamp[k][k2]['blend_mode'] == 1:
-                            render_frame = ImageChops.add(render_frame, image2)
+                            # render_frame = ImageChops.add(render_frame, image2)
+                            render_frame = imageops.image_blend_2(image2, render_frame, 1.0, 1.0)
 
                         elif render_by_timestamp[k][k2]['blend_mode'] == 2:
                             render_frame = ImageChops.subtract(render_frame, image2)
 
                         else:
-                            render_frame.paste(image2, (0, 0), image2)
-                            # render_frame = Image.alpha_composite(render_frame, image2)
+                            # render_frame.paste(image2, (0, 0), image2)
+                            render_frame = Image.alpha_composite(render_frame, image2)
 
                     else:
-                        render_frame.paste(image2, (0, 0), image2)
+                        # render_frame.paste(image2, (0, 0), image2)
+                        render_frame = Image.alpha_composite(render_frame, image2)
 
                     # image2.save("output_%d_%d.png" % (k2, k))
 
