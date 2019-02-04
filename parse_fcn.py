@@ -25,6 +25,11 @@ with open(sys.argv[1], "rb") as infile:
 
         infile.seek(0x10 + filetable_size + offset)
 
+        data = infile.read(datalen)
+
+        with open(filename, "wb") as outfile:
+            outfile.write(data)
+
         if CONVERT_TIM and filename.lower().endswith(".tim"):
             from tim2png import readTimImage
 
@@ -32,12 +37,5 @@ with open(sys.argv[1], "rb") as infile:
 
             print("Extracting", filename)
 
-            data = infile.read(datalen)
             image = readTimImage(io.BytesIO(data))
             image.save(filename)
-
-        else:
-            print("Extracting", filename)
-
-            with open(filename, "wb") as outfile:
-                outfile.write(infile.read(datalen))

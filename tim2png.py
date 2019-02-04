@@ -25,7 +25,9 @@ import hexdump
 # Convert 16-bit little-endian ABGR format to ARGB (PIL's "BGR;15" format).
 def convertABGR(data):
     output = bytearray()
+    output2 = []
 
+    has_transparency = False
     for i in range(0, len(data), 2):
         pixel = struct.unpack_from("<H", data, i)[0]
 
@@ -35,13 +37,22 @@ def convertABGR(data):
         a = pixel & 0x8000
         pixel = a | (r << 10) | (g << 5) | b
 
+        if a != 0:
+            has_transparency = True
+
         output.extend(struct.pack("<H", pixel))
 
-    return output
+        r = int((255 / 31) * r)
+        g = int((255 / 31) * g)
+        b = int((255 / 31) * b)
+
+        output2.append((r, g, b, a * 255))
+
+    return output, output2, has_transparency
 
 
 # Read TIM image from file
-def readTimImage(f, clut_idx=0, transparency_idx=None):
+def readTimImage(f, clut_idx=0, transparency_flag=True):
     # Check header
     header = f.read(8)
     if header[:4] != b"\x10\x00\x00\x00":
@@ -61,6 +72,8 @@ def readTimImage(f, clut_idx=0, transparency_idx=None):
     palette = None
 
     haveClut = flags & 8
+    transparency_idx = None
+    has_transparency = False
     if haveClut:
         # Check CLUT header
         clutSize = struct.unpack("<I", f.read(4))[0]
@@ -74,20 +87,25 @@ def readTimImage(f, clut_idx=0, transparency_idx=None):
         # Read CLUT data and convert to BGR;15
         clut = f.read(numEntries * 2)
 
-        if clut_idx < numEntries // 0x10:
-            clut = clut[clut_idx*0x20:]
+        palette_size = 0x10
+
+        if pMode == 1:
+            palette_size = 0x100
+
+        if clut_idx < numEntries // palette_size:
+            clut = clut[clut_idx*(palette_size*2):]
 
         if pMode == 0:
             clut += b'\xff' * 32 * 16  # extend to 256 entries
-            clut = clut[:512]
 
-        clut = convertABGR(clut)
+        clut = clut[:0x200]
 
-        if transparency_idx != 0x48:
-            for i in range(0, len(clut), 2):
-                if clut[i] == 0 and clut[i+1] == 0:
-                    transparency_idx = i // 2
-                    break
+        clut, clut2, has_transparency = convertABGR(clut)
+
+        for i in range(0, len(clut), 2):
+            if clut[i] == 0 and clut[i+1] == 0:
+                transparency_idx = i // 2
+                break
 
         palette = ImagePalette.raw("BGR;15", bytes(clut))
 
@@ -104,53 +122,63 @@ def readTimImage(f, clut_idx=0, transparency_idx=None):
     pixelData = f.read(expectedSize)
 
     # Create image, converting pixel data if necessary
-    if pMode == 0:
+    if pMode in [0, 1]:
         # 4-bit indexed mode, 4 pixels in each 16-bit unit
-        width *= 4
-
-        # Expand 4-bit pixel data to 8-bit
-        output = bytearray()
-        for x in pixelData:
-            pix0 = x & 0x0f
-            pix1 = x >> 4
-
-            output.append(pix0)
-            output.append(pix1)
-
-        image = Image.frombytes("P", (width, height), bytes(output), "raw", "P", 0, 1)
-        image.palette = palette
-
-    elif pMode == 1:
-
-        # 8-bit indexed mode, 2 pixels in each 16-bit unit
         width *= 2
 
-        image = Image.frombytes("P", (width, height), bytes(pixelData), "raw", "P", 0, 1)
-        image.palette = palette
+        if pMode == 0:
+            width *= 2
+
+            # Expand 4-bit pixel data to 8-bit
+            output = bytearray()
+            for x in pixelData:
+                pix0 = x & 0x0f
+                pix1 = x >> 4
+
+                output.append(pix0)
+                output.append(pix1)
+
+        else:
+            output = pixelData
+
+        # image = Image.frombytes("P", (width, height), bytes(output), "raw", "P", 0, 1)
+        # image.palette = palette
+
+        if has_transparency:
+            image = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            pixels = image.load()
+
+            i = 0
+            for y in range(height):
+                for x in range(width):
+                    pixels[x, y] = clut2[output[i]]
+                    i += 1
+
+        else:
+            image = Image.frombytes("P", (width, height), bytes(output), "raw", "P", 0, 1)
+            image.palette = palette
+
+            if transparency_idx != None:
+                import io
+                image_data = io.BytesIO()
+                image.save(image_data, "PNG", transparency=transparency_idx)
+
+                image.close()
+                del image
+
+                image = Image.open(image_data)
 
     elif pMode == 2:
-
         # 16-bit direct mode, convert from ABGR to ARGB
         output = convertABGR(pixelData)
 
         image = Image.frombytes("RGB", (width, height), bytes(output), "raw", "BGR;15", 0, 1)
 
     elif pMode == 3:
-
         # 24-bit direct mode, 2 pixels in three 16-bit units
         width = width * 2 / 3
 
         image = Image.frombytes("RGB", (width, height), bytes(pixelData), "raw", "RGB", 0, 1)
-
-    if transparency_idx != 0x48:
-        import io
-        image_data = io.BytesIO()
-        image.save(image_data, "PNG", transparency=transparency_idx)
-
-        image.close()
-        del image
-
-        image = Image.open(image_data)
 
     return image.convert("RGBA")
 
