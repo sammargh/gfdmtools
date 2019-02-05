@@ -1,37 +1,120 @@
 import ctypes
 import hexdump
+import io
 import struct
 import sys
 import os
+import re
 
 from PIL import Image, ImageChops
 import tim2png
 
 import imageops
 
-def parse_obj(filename):
-    found_ids = []
+def parse_obj(data):
     filenames = []
 
-    with open(filename, "rb") as infile:
-        infile.seek(0, 2)
-        filesize = infile.tell()
-        infile.seek(0)
+    filesize = len(data)
+    entry_count = filesize // 0x30
 
-        entry_count = filesize // 0x30
+    for i in range(entry_count):
+        filename = data[i*0x30:i*0x30+0x1c].decode('shift-jis').strip().strip('\0')
+        unk1, unk2, arr_unk1, arr_unk2, arr_unk3, arr_unk4, w, h, arr_unk5, anim_group_id = struct.unpack("<HHHHHHHHHH", data[i*0x30+0x1c:i*0x30+0x1c+0x14])
 
-        for i in range(entry_count):
-            filename = infile.read(0x1c).decode('shift-jis').strip().strip('\0')
-            unk1, unk2, arr_unk1, arr_unk2, arr_unk3, arr_unk4, w, h, arr_unk5, anim_group_id = struct.unpack("<HHHHHHHHHH", infile.read(0x14))
+        output_filenames = []
 
+        if '@' in filename:
+            match = re.search(r'@(\d+)_(\d+)(?:\.(\d+))?$', filename)
+
+            subimages = int(match.group(1))
+            subimages2 = int(match.group(2))
+
+            if subimages2 != 1:
+                print("Found subimages2", subimages2)
+                exit(1)
+
+            subimages_base = 0
+            if match.group(3):
+                subimages_base = int(match.group(3))
+
+            subimages_base *= subimages
+
+            # Split image into x subimages
+            for j in range(subimages):
+                new_filename = filename.replace(match.group(0), "_%03d" % (j + subimages_base))
+                output_filenames.append(new_filename)
+
+        else:
+            output_filenames.append(filename)
+
+        for filename in output_filenames:
             print("%04d: %s %d %d %d %d %d %d (%d, %d) %d anim_group_id[%d]" % (i, filename, unk1, unk2, arr_unk1, arr_unk2, arr_unk3, arr_unk4, w, h, arr_unk5, anim_group_id))
-
             filenames.append(filename)
 
     return filenames
 
 
-def parse_dat(filename, animation_filenames=[], tim_folder=None):
+
+
+def get_images_from_fcn(filename):
+    output_files = {}
+
+    with open(filename, "rb") as infile:
+        filesize, unk1, filetable_size, unk2 = struct.unpack("<IIII", infile.read(16))
+
+        file_count = filesize & 0xffff #filetable_size // 0x28
+
+        for i in range(file_count):
+            infile.seek(0x10 + (i * 0x28))
+
+            filename = infile.read(0x20).decode('shift-jis').strip()
+
+            offset, datalen = struct.unpack("<II", infile.read(8))
+
+            infile.seek(0x10 + (file_count * 0x28) + offset)
+
+            data = infile.read(datalen)
+
+            print("Extracting", filename)
+
+            if filename.endswith('tim'):
+                from tim2png import readTimImage
+                image = readTimImage(io.BytesIO(data))
+
+                filename = filename[:-4]
+
+                if '@' in filename:
+                    match = re.search(r'@(\d+)_(\d+)(?:\.(\d+))?$', filename)
+
+                    subimages = int(match.group(1))
+                    subimages2 = int(match.group(2))
+
+                    if subimages2 != 1:
+                        print("Found subimages2", subimages2)
+                        exit(1)
+
+                    subimages_base = 0
+                    if match.group(3):
+                        subimages_base = int(match.group(3))
+
+                    subimages_base *= subimages
+
+                    # Split image into x subimages
+                    for j in range(subimages):
+                        new_filename = filename.replace(match.group(0), "_%03d" % (j + subimages_base))
+                        subimage = image.crop(((image.width / subimages) * j, 0, (image.width / subimages) * (j + 1), image.height))
+                        output_files[new_filename] = subimage.copy()
+
+                else:
+                    output_files[filename] = data
+
+            else:
+                output_files[filename] = data
+
+    return output_files
+
+
+def parse_dat(filename, animation_filenames=[], sprite_images={}):
     with open(filename, "rb") as infile:
         if infile.read(4) != b"AEBG":
             print("Not a AEBG animation file")
@@ -60,6 +143,7 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
             filenames.append(filename)
 
         print(filenames)
+        print(animation_filenames)
 
         base_images = []
 
@@ -282,7 +366,7 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
 
                     # How does the time per frame work?
 
-                    if subcommand == 4:
+                    if subcommand in [4, 5]:
                         time_per_image = round(60 / time_per_image)
                         flip_mode -= 1
 
@@ -310,7 +394,7 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
                         elif flip_mode == 1:
                             anim_frame_idx = (anim_frame_idx + 1) % anim_image_count
 
-                        elif flip_mode == 2:
+                        elif flip_mode >= 2:
                             if anim_frame_idx - 1 < 0:
                                 if flip_val == 0:
                                     flip_val = 1
@@ -340,19 +424,22 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
                     offset_x = ctypes.c_short(offset_x).value // 16
                     offset_y = ctypes.c_short(offset_y).value // 16
 
+                    print("Sprite (tiled image): %d ms per frame, (%d, %d) offset" % (time_per_image, offset_x, offset_y))
+                    # exit(1)
+
                     anim_frame_idx = 0
                     cur_offset_x = 0
                     cur_offset_y = 0
 
-                    for idx in range(start_timestamp, end_timestamp, time_per_image):
-                        for j in range(0, time_per_image):
+                    for idx in range(start_timestamp, end_timestamp, 1):
+                        for j in range(0, 1):
                             if idx + j >= end_timestamp:
                                 break
 
                             render_by_timestamp[idx + j][entry_idx]['filename'] = animation_filenames[anim_idx + anim_frame_idx]
                             render_by_timestamp[idx + j][entry_idx]['offset_x'] = cur_offset_x
                             render_by_timestamp[idx + j][entry_idx]['offset_y'] = cur_offset_y
-                            render_by_timestamp[idx + j][entry_idx]['tile'] = True
+                            render_by_timestamp[idx + j][entry_idx]['tile'] = time_per_image
 
                             cur_offset_x += offset_x
                             cur_offset_y += offset_y
@@ -452,7 +539,7 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
                 else:
                     last_rotate = render_by_timestamp[idx][entry_idx]['rotate']
 
-        if tim_folder:
+        if sprite_images:
             frames = []
 
             image_cache = {}
@@ -468,7 +555,7 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
                 # if k < 2274 or k > 2274:
                 #     continue
 
-                if k < 0 or k > 200:
+                if k < 0 or k > 1000:
                     continue
 
                 print()
@@ -489,12 +576,16 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
                             image = image_cache[render_by_timestamp[k][k2]['filename'] + "_" + str(render_by_timestamp[k][k2]['clut'])].copy()
 
                         else:
-                            tim_filename = os.path.join(tim_folder, render_by_timestamp[k][k2]['filename'] + ".tim")
+                            if render_by_timestamp[k][k2]['filename'] not in sprite_images:
+                                continue
 
-                            with open(tim_filename, "rb") as f:
-                                image = tim2png.readTimImage(f, render_by_timestamp[k][k2]['clut'])
+                            image = sprite_images[render_by_timestamp[k][k2]['filename']]
 
-                            image_cache[render_by_timestamp[k][k2]['filename'] + "_" + str(render_by_timestamp[k][k2]['clut'])] = image.copy()
+                            if not isinstance(image, Image.Image):
+                                image = tim2png.readTimImage(io.BytesIO(image), render_by_timestamp[k][k2]['clut'])
+
+                                if render_by_timestamp[k][k2]['filename'] + "_" + str(render_by_timestamp[k][k2]['clut']) not in image_cache:
+                                    image_cache[render_by_timestamp[k][k2]['filename'] + "_" + str(render_by_timestamp[k][k2]['clut'])] = image.copy()
 
                     if render_by_timestamp[k][k2].get('opacity', 1.0) != 1.0:
                         pixels = image.load()
@@ -533,13 +624,24 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
 
                     image2 = Image.new(render_frame.mode, render_frame.size, (0, 0, 0, 0))
 
-                    if render_by_timestamp[k][k2].get('tile', False):
+                    new_x = int((render_by_timestamp[k][k2]['x'] - (frame_width // 2)) + ((frame_width - image.width) // 2))
+                    new_y = int((render_by_timestamp[k][k2]['y'] - (frame_height // 2)) + ((frame_height - image.height) // 2))
+
+                    if render_by_timestamp[k][k2].get('tile', 0) == 1:
                         for i in range(0, image2.width, image.width):
                             for j in range(0, image2.height, image.height):
                                 image2.paste(image, (i, j))
 
+                    elif render_by_timestamp[k][k2].get('tile', 0) == 2:
+                        for i in range(0, image2.width, image.width):
+                            image2.paste(image, (i, new_y))
+
+                    elif render_by_timestamp[k][k2].get('tile', 0) == 3:
+                        for j in range(0, image2.height, image.height):
+                            image2.paste(image, (new_x, j))
+
                     else:
-                        image2.paste(image, (int(render_by_timestamp[k][k2]['x'] - frame_width // 2 + (frame_width - image.width) // 2), int(render_by_timestamp[k][k2]['y'] - frame_height // 2 + (frame_height - image.height) // 2)), image)
+                        image2.paste(image, (new_x, new_y), image)
 
                     if 'blend_mode' in render_by_timestamp[k][k2]:
                         if render_by_timestamp[k][k2]['blend_mode'] == 1:
@@ -550,8 +652,8 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
                             render_frame = ImageChops.subtract(render_frame, image2)
 
                         else:
-                            # render_frame.paste(image2, (0, 0), image2)
-                            render_frame = Image.alpha_composite(render_frame, image2)
+                            render_frame.paste(image2, (0, 0), image2)
+                            # render_frame = Image.alpha_composite(render_frame, image2)
 
                     else:
                         # render_frame.paste(image2, (0, 0), image2)
@@ -574,5 +676,7 @@ def parse_dat(filename, animation_filenames=[], tim_folder=None):
                 x.close()
                 del x
 
-filenames = parse_obj(sys.argv[2])
-parse_dat(sys.argv[1], filenames, sys.argv[3])
+fcn_files = get_images_from_fcn(sys.argv[2])
+obj_filename = [x for x in fcn_files if x.endswith('.obj')][0]
+filenames = parse_obj(fcn_files[obj_filename])
+parse_dat(sys.argv[1], filenames, fcn_files)

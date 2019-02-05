@@ -13,17 +13,16 @@ if not os.path.exists(basepath):
 with open(sys.argv[1], "rb") as infile:
     filesize, unk1, filetable_size, unk2 = struct.unpack("<IIII", infile.read(16))
 
-    file_count = filetable_size // 0x28
+    file_count = filesize & 0xffff #filetable_size // 0x28
 
     for i in range(file_count):
         infile.seek(0x10 + (i * 0x28))
 
         filename = infile.read(0x20).decode('shift-jis').strip()
         filename = os.path.join(basepath, filename)
-
         offset, datalen = struct.unpack("<II", infile.read(8))
 
-        infile.seek(0x10 + filetable_size + offset)
+        infile.seek(0x10 + (file_count * 0x28) + offset)
 
         data = infile.read(datalen)
 
