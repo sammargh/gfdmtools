@@ -13,7 +13,15 @@ if not os.path.exists(basepath):
 with open(sys.argv[1], "rb") as infile:
     filesize, unk1, filetable_size, unk2 = struct.unpack("<IIII", infile.read(16))
 
-    file_count = filesize & 0xffff #filetable_size // 0x28
+    is_new_format = False
+    if filesize & 0x08000000 != 0:
+        is_new_format = True
+
+    if is_new_format:
+        file_count = filesize & 0xffff
+
+    else:
+        file_count = filetable_size // 0x28
 
     for i in range(file_count):
         infile.seek(0x10 + (i * 0x28))
@@ -22,7 +30,11 @@ with open(sys.argv[1], "rb") as infile:
         filename = os.path.join(basepath, filename)
         offset, datalen = struct.unpack("<II", infile.read(8))
 
-        infile.seek(0x10 + (file_count * 0x28) + offset)
+        if is_new_format:
+            infile.seek(0x10 + (file_count * 0x28) + offset)
+
+        else:
+            infile.seek(0x10 + filetable_size + offset)
 
         data = infile.read(datalen)
 

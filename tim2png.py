@@ -38,7 +38,7 @@ def convertABGR(data):
         pixel = a | (r << 10) | (g << 5) | b
 
         if a != 0:
-            has_transparency = True
+            has_transparency = False
 
         output.extend(struct.pack("<H", pixel))
 
