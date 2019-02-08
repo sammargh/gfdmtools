@@ -179,7 +179,10 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
             initial_x_zoom, initial_y_zoom = struct.unpack("<HH", first_block[0x1e:0x22])
             anim_in_time, anim_out_time  = struct.unpack("<HH", first_block[0x22:0x26])
             initial_animation_idx, initial_clut = struct.unpack("<BB", first_block[0x28:0x2a])
-            frame_time_initial, frame_time_initial2 = struct.unpack("<HH", first_block[0x22:0x26])
+            sprite_x, sprite_y = struct.unpack("<HH", first_block[0x22:0x26])
+
+            sprite_x *= 2
+            sprite_y *= 2
 
             blend_mode = ctypes.c_short(blend_mode).value
 
@@ -342,32 +345,18 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
                         print("Unknown effect subcommand", subcommand)
                         # exit(1)
 
-                elif command == 1 and subcommand != 2:
-                    # Sprite command
+                elif command == 1 and subcommand == 0:
+                    # Sprite command, no frame speed calculation
                     anim_image_count, time_per_image, flip_mode = struct.unpack("<HHI", cur_block[16:24])
                     anim_idx = animation_filenames.index(filenames[anim_id])
 
                     # Image-based animation
-                    print("Sprite (image): %d images, %d ms per frame, flip mode %d" % (anim_image_count, time_per_image, flip_mode))
+                    print("Sprite (image): %d images, %d frames per image, flip mode %d" % (anim_image_count, time_per_image, flip_mode))
 
                     for idx in range(anim_idx, anim_idx + anim_image_count):
                         print(animation_filenames[idx])
 
                     anim_frame_idx = initial_animation_idx
-
-                    print(start_timestamp, end_timestamp, (end_timestamp - start_timestamp), frame_time_initial, frame_time_initial / 60, (frame_time_initial / 60) * time_per_image, time_per_image)
-
-                    # if flip_mode in [3, 6]:
-                    #     time_per_image = round(60 * (frame_time_initial / frame_time_initial2) / ((anim_image_count + 1) * 2))
-                    # else:
-                    #     time_per_image = round(60 * (frame_time_initial / frame_time_initial2) / (anim_image_count * 2))
-
-                    # print((60 * (frame_time_initial / frame_time_initial2) / (anim_image_count * time_per_image)))
-
-
-                    #time_per_image = round(60 / time_per_image)
-                    time_per_image = round((end_timestamp - start_timestamp) / time_per_image)
-                    print(time_per_image)
 
                     flip_val = 0
                     for idx in range(start_timestamp, end_timestamp, time_per_image):
@@ -377,43 +366,18 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
 
                             afi = anim_frame_idx
 
-                            if flip_mode in [4, 5, 6]:
-                                afi = anim_image_count - afi - 1
-
                             render_by_timestamp[idx + j][entry_idx]['filename'] = animation_filenames[anim_idx + afi]
                             render_by_timestamp[idx + j][entry_idx]['clut'] = initial_clut
 
-                        if flip_mode in [0, 4]:
-                            anim_frame_idx = (anim_frame_idx + 1)
-
-                            if anim_frame_idx >= anim_image_count:
-                                anim_frame_idx = anim_image_count - 1
-
-                        elif flip_mode in [1, 2, 5]:
+                        if flip_mode in [1]:
                             anim_frame_idx = (anim_frame_idx + 1) % anim_image_count
 
-                        elif flip_mode in [3, 6]:
-                            if anim_frame_idx - 1 < 0:
-                                if flip_val == 0:
-                                    flip_val = 1
-
-                                else:
-                                    flip_val = 0
-
-                            elif anim_frame_idx + 1 >= anim_image_count:
-                                if flip_val == 0:
-                                    flip_val = -1
-
-                                else:
-                                    flip_val = 0
-
-                            # elif anim_frame_idx + 1 >= anim_image_count:
-                            #     flip_val = -1
-
-                            # print(anim_id, anim_image_count, flip_val, anim_frame_idx)
-                            anim_frame_idx += flip_val
-
                         else:
+                            # anim_frame_idx = (anim_frame_idx + 1)
+
+                            # if anim_frame_idx >= anim_image_count:
+                            #     anim_frame_idx = anim_image_count - 1
+
                             print("Unknown flip mode", flip_mode)
                             exit(1)
 
@@ -422,12 +386,11 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
                     # Scroll sprite command
                     anim_idx = animation_filenames.index(filenames[anim_id])
 
-                    time_per_image, offset_x, offset_y = struct.unpack("<HHH", cur_block[16:22])
-                    offset_x = ctypes.c_short(offset_x).value // 16
-                    offset_y = ctypes.c_short(offset_y).value // 16
+                    time_per_image, offset_x, offset_y = struct.unpack("<HHH", cur_block[0x10:0x16])
+                    offset_x = ctypes.c_short(offset_x).value / 16
+                    offset_y = ctypes.c_short(offset_y).value / 16
 
-                    print("Sprite (tiled image): %d ms per frame, (%d, %d) offset" % (time_per_image, offset_x, offset_y))
-                    # exit(1)
+                    print("Sprite (tiled image): %d frames per image, (%d, %d) offset" % (time_per_image, offset_x, offset_y))
 
                     anim_frame_idx = initial_animation_idx
                     cur_offset_x = 0
@@ -439,89 +402,73 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
                                 break
 
                             render_by_timestamp[idx + j][entry_idx]['filename'] = animation_filenames[anim_idx + anim_frame_idx]
-                            render_by_timestamp[idx + j][entry_idx]['offset_x'] = cur_offset_x
-                            render_by_timestamp[idx + j][entry_idx]['offset_y'] = cur_offset_y
+                            render_by_timestamp[idx + j][entry_idx]['offset_x'] = int(cur_offset_x)
+                            render_by_timestamp[idx + j][entry_idx]['offset_y'] = int(cur_offset_y)
                             render_by_timestamp[idx + j][entry_idx]['tile'] = time_per_image
 
                             cur_offset_x += offset_x
                             cur_offset_y += offset_y
 
-                elif command == 1 and subcommand != 2:
-                    # Sprite command
+
+                elif command == 1:
+                    # Sprite command, any other cases not handled above
                     anim_image_count, time_per_image, flip_mode = struct.unpack("<HHI", cur_block[16:24])
                     anim_idx = animation_filenames.index(filenames[anim_id])
 
-                    if subcommand in [0, 4]:
-                        # Image-based animation
-                        print("Sprite (image): %d images, %d ms per frame, flip mode %d" % (anim_image_count, time_per_image, flip_mode))
+                    # Image-based animation
+                    print("Sprite (image): %d images, %d frames per image, flip mode %d" % (anim_image_count, time_per_image, flip_mode))
 
-                        for idx in range(anim_idx, anim_idx + anim_image_count):
-                            print(animation_filenames[idx])
+                    for idx in range(anim_idx, anim_idx + anim_image_count):
+                        print(animation_filenames[idx])
 
-                        anim_frame_idx = initial_animation_idx
+                    anim_frame_idx = initial_animation_idx
 
-                    elif subcommand in [1, 5]:
-                        # Clut-based animation
-                        print("Sprite (clut): %d images, %d ms per frame, flip mode %d" % (anim_image_count, time_per_image, flip_mode))
-                        print(animation_filenames[anim_idx])
-
-                        anim_frame_idx = initial_clut
+                    # TODO: Rewrite code to handle time divisions with fractions (3 + 2 frames instead of 2.5, for example)
+                    if time_per_image == 1:
+                        time_per_image = 45
 
                     else:
-                        print("Unknown subcommand image type", subcommand)
-                        exit(1)
+                        time_per_image = 60 / time_per_image
 
-                    # time_per_image = round(time_per_image / anim_image_count)
-                    # if subcommand in [4, 5]:
-                    #     time_per_image *= 4
-
-                    # time_per_image = int((end_timestamp - start_timestamp) / time_per_image / anim_image_count)
-
-                    # How does the time per frame work?
-
-                    time_per_image = int((end_timestamp - start_timestamp) * time_per_image / anim_image_count)
-                    if subcommand in [4, 5]:
-                        flip_mode -= 1
+                    print(time_per_image)
 
                     flip_val = 0
-                    for idx in range(start_timestamp, end_timestamp, time_per_image):
-                        for j in range(0, time_per_image):
-                            if idx + j >= end_timestamp:
+                    cur_timestamp = start_timestamp
+                    while cur_timestamp < end_timestamp:
+                        for j in range(0, int(cur_timestamp + time_per_image) - int(cur_timestamp)):
+                            if int(cur_timestamp) + j >= end_timestamp:
                                 break
 
-                            if subcommand in [0, 4]:
-                                render_by_timestamp[idx + j][entry_idx]['filename'] = animation_filenames[anim_idx + anim_frame_idx]
-                                render_by_timestamp[idx + j][entry_idx]['clut'] = initial_clut
+                            afi = anim_frame_idx
 
-                            elif subcommand in [1, 5]:
-                                render_by_timestamp[idx + j][entry_idx]['filename'] = animation_filenames[anim_idx]
-                                render_by_timestamp[idx + j][entry_idx]['clut'] = anim_frame_idx
+                            if flip_mode in [4, 5, 6]:
+                                afi = anim_image_count - afi - 1
 
-                        if flip_mode in [-1, 0]:
+                            render_by_timestamp[int(cur_timestamp) + j][entry_idx]['filename'] = animation_filenames[anim_idx + afi]
+                            render_by_timestamp[int(cur_timestamp) + j][entry_idx]['clut'] = initial_clut
+
+                        cur_timestamp += time_per_image
+
+                        if time_per_image == 0:
+                            cur_timestamp += 1
+                            continue
+
+                        if flip_mode in [1, 4]:
                             anim_frame_idx = (anim_frame_idx + 1)
 
                             if anim_frame_idx >= anim_image_count:
                                 anim_frame_idx = anim_image_count - 1
 
-                        elif flip_mode == 1:
+                        elif flip_mode in [2, 5]:
                             anim_frame_idx = (anim_frame_idx + 1) % anim_image_count
 
-                        elif flip_mode >= 2:
+                        elif flip_mode in [3, 6]:
                             if anim_frame_idx - 1 < 0:
-                                if flip_val == 0:
-                                    flip_val = 1
-
-                                else:
-                                    flip_val = 0
+                                flip_val = 1
 
                             elif anim_frame_idx + 1 >= anim_image_count:
-                                if flip_val == 0:
-                                    flip_val = -1
+                                flip_val = -1
 
-                                else:
-                                    flip_val = 0
-
-                            # print(anim_id, anim_image_count, flip_val, anim_frame_idx)
                             anim_frame_idx += flip_val
 
                         else:
@@ -653,8 +600,14 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
                 # if k < 690 or k > 1000:
                 #     continue
 
-                if k < 696 or k > 978:
-                    continue
+                # if k < 0 or k > 700:
+                #     continue
+
+                # if k < 4756 or k > 6000:
+                #     continue
+
+                # if k < 3780 or k > 3900:
+                #     continue
 
                 print()
                 print()
