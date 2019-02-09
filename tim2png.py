@@ -37,8 +37,12 @@ def convertABGR(data):
         a = pixel & 0x8000
         pixel = a | (r << 10) | (g << 5) | b
 
-        if a != 0:
-            has_transparency = False
+        if (r, g, b) == (0, 0, 0):
+            a = 0
+            has_transparency = True
+
+        else:
+            a = 255
 
         output.extend(struct.pack("<H", pixel))
 
@@ -46,7 +50,7 @@ def convertABGR(data):
         g = int((255 / 31) * g)
         b = int((255 / 31) * b)
 
-        output2.append((r, g, b, a * 255))
+        output2.append((r, g, b, a))
 
     return output, output2, has_transparency
 
@@ -101,6 +105,9 @@ def readTimImage(f, clut_idx=0, transparency_flag=True):
         clut = clut[:0x200]
 
         clut, clut2, has_transparency = convertABGR(clut)
+
+        hexdump.hexdump(clut)
+        print(clut2[0], clut2[0x10], clut2[0x20+1])
 
         for i in range(0, len(clut), 2):
             if clut[i] == 0 and clut[i+1] == 0:
