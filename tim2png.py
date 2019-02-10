@@ -78,6 +78,7 @@ def readTimImage(f, clut_idx=0, transparency_flag=True):
     haveClut = flags & 8
     transparency_idx = None
     has_transparency = False
+    clut_count = 0
     if haveClut:
         # Check CLUT header
         clutSize = struct.unpack("<I", f.read(4))[0]
@@ -99,15 +100,13 @@ def readTimImage(f, clut_idx=0, transparency_flag=True):
         if clut_idx < numEntries // palette_size:
             clut = clut[clut_idx*(palette_size*2):]
 
+        clut_count = numEntries // palette_size
+
         if pMode == 0:
             clut += b'\xff' * 32 * 16  # extend to 256 entries
 
         clut = clut[:0x200]
-
         clut, clut2, has_transparency = convertABGR(clut)
-
-        hexdump.hexdump(clut)
-        print(clut2[0], clut2[0x10], clut2[0x20+1])
 
         for i in range(0, len(clut), 2):
             if clut[i] == 0 and clut[i+1] == 0:
@@ -187,7 +186,7 @@ def readTimImage(f, clut_idx=0, transparency_flag=True):
 
         image = Image.frombytes("RGB", (width, height), bytes(pixelData), "raw", "RGB", 0, 1)
 
-    return image.convert("RGBA")
+    return image.convert("RGBA"), clut_count
 
 
 if __name__ == "__main__":

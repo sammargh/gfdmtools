@@ -48,5 +48,5 @@ with open(sys.argv[1], "rb") as infile:
 
             print("Extracting", filename)
 
-            image = readTimImage(io.BytesIO(data))
+            image, _ = readTimImage(io.BytesIO(data))
             image.save(filename)

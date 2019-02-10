@@ -11,7 +11,63 @@ import tim2png
 
 import imageops
 
-def parse_obj(data):
+def get_special_info(filename, fcn_files):
+    match = re.search(r'(.*)@(\d+)_(\d+)(\..*)?$', filename)
+    _, cluts = tim2png.readTimImage(io.BytesIO(fcn_files[filename]), 0)
+
+    base_filename = match.group(1)
+    split_width = int(match.group(2))
+    split_height = int(match.group(3))
+
+    # Find all related files
+    related_files = []
+    for fcn_filename in fcn_files:
+        if fcn_filename.startswith(base_filename + '@'):
+            related_files.append(fcn_filename)
+
+    output = {}
+    for clut in range(0, cluts + 1):
+        related_images = []
+        max_width = 0
+        max_height = 0
+        for related_file in related_files:
+            image, _ = tim2png.readTimImage(io.BytesIO(fcn_files[related_file]), clut)
+            related_images.append(image)
+
+            if image.width > max_width:
+                max_width = image.width
+
+            max_height += image.height
+
+        for related_image in related_images:
+            image = Image.new('RGBA', (max_width, max_height), (0, 0, 0, 0))
+
+            cur_y = 0
+            for related_image in related_images:
+                image.paste(related_image, (0, cur_y), related_image)
+                cur_y += related_image.height
+
+            # image.save("output_%s_%d.png" % (base_filename, clut))
+
+            # Split up sprite sheet into correct sprites
+            cur_idx = 0
+            for x in range(split_width):
+                for y in range(split_height):
+                    sprite = image.crop((image.width // split_width * x, image.height // split_height * y, image.width // split_width * (x + 1), image.height // split_height * (y + 1)))
+                    # sprite.save("output_%s_%d_%d.png" % (base_filename, clut, cur_idx))
+
+                    output_filename = "%s_%03d" % (base_filename, cur_idx)
+                    cur_idx += 1
+
+                    if output_filename not in output:
+                        output[output_filename] = {}
+
+                    output[output_filename][clut] = sprite
+
+    return output
+
+
+def parse_obj(data, fcn_files):
     filenames = []
 
     filesize = len(data)
@@ -21,35 +77,8 @@ def parse_obj(data):
         filename = data[i*0x30:i*0x30+0x1c].decode('shift-jis').strip().strip('\0')
         unk1, unk2, arr_unk1, arr_unk2, arr_unk3, arr_unk4, w, h, arr_unk5, anim_group_id = struct.unpack("<HHHHHHHHHH", data[i*0x30+0x1c:i*0x30+0x1c+0x14])
 
-        output_filenames = []
-
-        if '@' in filename:
-            match = re.search(r'@(\d+)_(\d+)(?:\.(\d+))?$', filename)
-
-            subimages = int(match.group(1))
-            subimages2 = int(match.group(2))
-
-            if subimages2 != 1:
-                print("Found subimages2", subimages2)
-                exit(1)
-
-            subimages_base = 0
-            if match.group(3):
-                subimages_base = int(match.group(3))
-
-            subimages_base *= subimages
-
-            # Split image into x subimages
-            for j in range(subimages):
-                new_filename = filename.replace(match.group(0), "_%03d" % (j + subimages_base))
-                output_filenames.append(new_filename)
-
-        else:
-            output_filenames.append(filename)
-
-        for filename in output_filenames:
-            print("%04d: %s %d %d %d %d %d %d (%d, %d) %d anim_group_id[%d]" % (i, filename, unk1, unk2, arr_unk1, arr_unk2, arr_unk3, arr_unk4, w, h, arr_unk5, anim_group_id))
-            filenames.append(filename)
+        print("%04d: %s %d %d %d %d %d %d (%d, %d) %d anim_group_id[%d]" % (i, filename, unk1, unk2, arr_unk1, arr_unk2, arr_unk3, arr_unk4, w, h, arr_unk5, anim_group_id))
+        filenames.append(filename)
 
     return filenames
 
@@ -91,74 +120,34 @@ def get_images_from_fcn(filename):
 
             data = infile.read(datalen)
 
-            print("Extracting", filename)
-
             if filename.endswith('tim'):
                 filename = filename[:-4]
-
-                if '@' in filename:
-                    match = re.search(r'(.*)@\d+_\d+(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?$', filename)
-
-                    try:
-                        subimages_base = int(match.group(2))
-                    except:
-                        subimages_base = 0
-
-                    print(filename, subimages_base)
-
-                    if match.group(1) not in sheet_images:
-                        sheet_images[match.group(1)] = {}
-
-                    if subimages_base not in sheet_images[match.group(1)]:
-                        sheet_images[match.group(1)][subimages_base] = []
-
-                    sheet_images[match.group(1)][subimages_base].append((filename, data))
-
-                else:
-                    output_files[filename] = data
+                output_files[filename] = data
 
             else:
                 output_files[filename] = data
 
-        for k in sheet_images:
-            for sheet_idx in sheet_images[k]:
-                for sheet in sheet_images[k][sheet_idx]:
-                    filename, data = sheet
-                    match = re.search(r'@(\d+)_(\d+)(?:\.(\d+))?(?:\.(\d+))?$', filename)
+    output_images = {}
+    for filename in output_files:
+        print("Extracting", filename)
 
-                    sub_images_x = int(match.group(1))
-                    sub_images_y = int(match.group(2)) // len(sheet_images[k][sheet_idx])
+        if filename.endswith('.arr') or filename.endswith('.obj'):
+            output_images[filename] = output_files[filename]
 
-                    try:
-                        subimages_base = int(match.group(3))
+        else:
+            if '@' in filename:
+                output_images.update(get_special_info(filename, output_files))
 
-                        try:
-                            subimages_base2 = int(match.group(4))
-                        except:
-                            subimages_base2 = None
-                    except:
-                        subimages_base = 0
-                        subimages_base2 = None
+            else:
+                image, cluts = tim2png.readTimImage(io.BytesIO(output_files[filename]), 0)
 
-                    j = 0
-                    for x in range(sub_images_x):
-                        for y in range(sub_images_y):
-                            new_filename = filename.replace(match.group(0), "_%03d" % (j + (sub_images_x * sub_images_y * subimages_base)))
-                            print(new_filename)
+                output_images[filename] = { 0: image }
 
-                            if new_filename not in output_files or not isinstance(output_files[new_filename], list):
-                                output_files[new_filename] = []
+                for clut in range(1, cluts):
+                    image, _ = tim2png.readTimImage(io.BytesIO(output_files[filename]), clut)
+                    output_images[filename][clut] = image
 
-                            output_files[new_filename].append({
-                                'data': data,
-                                'region': (x, y),
-                                'division': (sub_images_x, sub_images_y)
-                            })
-                            j += 1
-
-    # exit(1)
-
-    return output_files
+    return output_images
 
 
 def parse_dat(filename, output_filename="output", animation_filenames=[], sprite_images={}):
@@ -213,15 +202,15 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
             initial_x_zoom, initial_y_zoom = struct.unpack("<HH", first_block[0x1e:0x22])
             anim_in_time, anim_out_time  = struct.unpack("<HH", first_block[0x22:0x26])
             initial_animation_idx, initial_clut = struct.unpack("<BB", first_block[0x28:0x2a])
-            sprite_x, sprite_y = struct.unpack("<HH", first_block[0x22:0x26])
-
-            sprite_x *= 2
-            sprite_y *= 2
+            initial_center_x, initial_center_y = struct.unpack("<HH", first_block[0x22:0x26])
 
             blend_mode = ctypes.c_short(blend_mode).value
 
             initial_x = ctypes.c_short(initial_x).value
             initial_y = ctypes.c_short(initial_y).value
+
+            initial_center_x = ctypes.c_short(initial_center_x).value
+            initial_center_y = ctypes.c_short(initial_center_y).value
 
             initial_x_zoom = ctypes.c_short(initial_x_zoom).value
             initial_y_zoom = ctypes.c_short(initial_y_zoom).value
@@ -693,6 +682,8 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
             last_zoom_x = initial_x_zoom
             last_zoom_y = initial_y_zoom
             last_rotate = initial_rotate
+            last_center_x = initial_center_x
+            last_center_y = initial_center_y
             cur_offset_x = 0
             cur_offset_y = 0
 
@@ -724,6 +715,12 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
 
                 if 'rotate' in render_by_timestamp[idx][entry_idx]:
                     last_rotate = render_by_timestamp[idx][entry_idx]['rotate']
+
+                if 'center_x' in render_by_timestamp[idx][entry_idx]:
+                    last_center_x = render_by_timestamp[idx][entry_idx]['center_x']
+
+                if 'center_y' in render_by_timestamp[idx][entry_idx]:
+                    last_center_y = render_by_timestamp[idx][entry_idx]['center_y']
 
             for idx in range(frame_start_timestamp, frame_end_timestamp):
                 if idx not in render_by_timestamp:
@@ -775,6 +772,16 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
                 else:
                     last_rotate = render_by_timestamp[idx][entry_idx]['rotate']
 
+                if 'center_x' not in render_by_timestamp[idx][entry_idx]:
+                    render_by_timestamp[idx][entry_idx]['center_x'] = last_center_x
+                else:
+                    last_center_x = render_by_timestamp[idx][entry_idx]['center_x']
+
+                if 'center_y' not in render_by_timestamp[idx][entry_idx]:
+                    render_by_timestamp[idx][entry_idx]['center_y'] = last_center_y
+                else:
+                    last_center_y = render_by_timestamp[idx][entry_idx]['center_y']
+
         # exit(1)
 
         # return
@@ -782,22 +789,8 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
         if sprite_images:
             frames = []
 
-            image_cache = {}
-
             print(frame_width, frame_height, total_start_frame, total_end_frame)
             for k in sorted(render_by_timestamp.keys()):
-                # if k < 528 or k > 948:
-                #     continue
-
-                # if k < 2766 or k > 2916:
-                #     continue
-
-                # if k < 1032 or k > 1380:
-                #     continue
-
-                # if k < 2670 or k > 3480:
-                #     continue
-
                 print()
                 print()
 
@@ -812,46 +805,19 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
                         image = render_by_timestamp[k][k2]['filename'].copy()
 
                     else:
+                        if render_by_timestamp[k][k2]['filename'] not in sprite_images:
+                            print("Couldn't find", render_by_timestamp[k][k2]['filename'])
+                            continue
 
-                        if render_by_timestamp[k][k2]['filename'] + "_" + str(render_by_timestamp[k][k2]['clut']) in image_cache:
-                            image = image_cache[render_by_timestamp[k][k2]['filename'] + "_" + str(render_by_timestamp[k][k2]['clut'])].copy()
+                        image = sprite_images[render_by_timestamp[k][k2]['filename']][render_by_timestamp[k][k2]['clut']].copy()
 
-                        else:
-                            if render_by_timestamp[k][k2]['filename'] not in sprite_images:
-                                continue
+                    center_x = render_by_timestamp[k][k2].get('center_x', image.width // 2)
+                    center_y = render_by_timestamp[k][k2].get('center_y', image.height // 2)
 
-                            image = sprite_images[render_by_timestamp[k][k2]['filename']]
-
-                            if isinstance(image, list):
-                                subimages = []
-
-                                for subimage_info in image:
-                                    image = tim2png.readTimImage(io.BytesIO(subimage_info['data']), render_by_timestamp[k][k2]['clut'])
-                                    x1 = (image.width / subimage_info['division'][0]) * subimage_info['region'][0]
-                                    x2 = (image.width / subimage_info['division'][0]) * (subimage_info['region'][0] + 1)
-
-                                    y1 = (image.height / subimage_info['division'][1]) * subimage_info['region'][1]
-                                    y2 = (image.height / subimage_info['division'][1]) * (subimage_info['region'][1] + 1)
-
-                                    subimages.append(image.crop((x1, y1, x2, y2)))
-
-                                image = Image.new('RGBA', (subimages[0].width, subimages[0].height * len(subimages)), (0, 0, 0, 0))
-
-                                for idx, subimage in enumerate(subimages):
-                                    image.paste(subimage, (0, subimage.height * idx), subimage)
-
-                            elif not isinstance(image, Image.Image):
-                                image = tim2png.readTimImage(io.BytesIO(image), render_by_timestamp[k][k2]['clut'])
-
-                            if render_by_timestamp[k][k2]['filename'] + "_" + str(render_by_timestamp[k][k2]['clut']) not in image_cache:
-                                image_cache[render_by_timestamp[k][k2]['filename'] + "_" + str(render_by_timestamp[k][k2]['clut'])] = image.copy()
-
-                    center_x = render_by_timestamp[k][k2].get('center_x', 0)
-                    center_y = render_by_timestamp[k][k2].get('center_y', 0)
-
-                    if center_x != 0 or center_y != 0:
-                        image3 = Image.new(image.mode, (image.width + center_x, image.height + center_y), (0, 0, 0, 0))
-                        image3.paste(image, (image3.width // 2 - center_x, image3.height // 2 - center_y), image)
+                    if center_x != image.width // 2 or center_y != image.height // 2:
+                        pos = ((image.width // 2) - center_x, (image.height // 2) - center_y)
+                        image3 = Image.new(image.mode, (image.width * 2, image.height * 2), (0, 0, 0, 0))
+                        image3.paste(image, ((image3.width // 2) - center_x, (image3.height // 2) - center_y), image)
 
                         image.close()
                         del image
@@ -924,8 +890,8 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
 
                     if 'blend_mode' in render_by_timestamp[k][k2]:
                         if render_by_timestamp[k][k2]['blend_mode'] == 1:
-                            render_frame = ImageChops.add(render_frame, image2)
-                            # render_frame = imageops.image_blend_2(image2, render_frame, render_by_timestamp[k][k2].get('opacity', 1.0), 1.0)
+                            # render_frame = ImageChops.add(render_frame, image2)
+                            render_frame = imageops.image_blend_2(image2, render_frame, render_by_timestamp[k][k2].get('opacity', 1.0), 1.0)
 
                         elif render_by_timestamp[k][k2]['blend_mode'] == 2:
                             render_frame = ImageChops.subtract(render_frame, image2)
@@ -961,7 +927,7 @@ print("Converting", sys.argv[1])
 
 fcn_files = get_images_from_fcn(sys.argv[2])
 obj_filename = [x for x in fcn_files if x.endswith('.obj')][0]
-filenames = parse_obj(fcn_files[obj_filename])
+filenames = parse_obj(fcn_files[obj_filename], fcn_files)
 
 base_filename = os.path.splitext(os.path.basename(sys.argv[1]))[0]
-parse_dat(sys.argv[1], base_filename, filenames, fcn_files)
+parse_dat(sys.argv[1], os.path.join(sys.argv[3], base_filename), filenames, fcn_files)
