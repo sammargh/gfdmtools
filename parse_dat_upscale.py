@@ -11,6 +11,8 @@ import tim2png
 
 import imageops
 
+UPSCALE_RATIO = 5
+
 def get_sprite_sheet_info(filename, fcn_files):
     _, cluts = tim2png.readTimImage(io.BytesIO(fcn_files[filename]), 0)
 
@@ -263,7 +265,7 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
                 base_images.append(filenames[anim_id])
 
             elif entry_type == 1:
-                base_images.append(Image.new("RGBA", (w, h), (blend_r, blend_g, blend_b, 255)))
+                base_images.append(Image.new("RGBA", (w * UPSCALE_RATIO, h * UPSCALE_RATIO), (blend_r, blend_g, blend_b, 255)))
 
             elif entry_type == 2:
                 # Frame information
@@ -810,146 +812,200 @@ def parse_dat(filename, output_filename="output", animation_filenames=[], sprite
         if sprite_images:
             frames = []
 
-            print(frame_width, frame_height, total_start_frame, total_end_frame)
-            for k in sorted(render_by_timestamp.keys()):
-                if k < 1000 or k > 1200:
-                    continue
-
-                print()
-                print()
-
-                render_frame = Image.new("RGBA", (frame_width, frame_height), (0, 0, 0, 0))
-                for k2 in sorted(render_by_timestamp[k].keys())[::-1]:
-                    if not render_by_timestamp[k][k2] or 'filename' not in render_by_timestamp[k][k2]:
-                        continue
-
-                    print(k, k2, render_by_timestamp[k][k2])
-
-                    if isinstance(render_by_timestamp[k][k2]['filename'], Image.Image):
-                        image = render_by_timestamp[k][k2]['filename'].copy()
-
-                    else:
-                        if render_by_timestamp[k][k2]['filename'] not in sprite_images:
-                            print("Couldn't find", render_by_timestamp[k][k2]['filename'])
-                            continue
-
-                        image = sprite_images[render_by_timestamp[k][k2]['filename']][render_by_timestamp[k][k2]['clut']].copy()
-
-                    center_x = render_by_timestamp[k][k2].get('center_x', image.width // 2)
-                    center_y = render_by_timestamp[k][k2].get('center_y', image.height // 2)
-
-                    if center_x != image.width // 2 or center_y != image.height // 2:
-                        pos = ((image.width // 2) - center_x, (image.height // 2) - center_y)
-                        image3 = Image.new(image.mode, (image.width * 2, image.height * 2), (0, 0, 0, 0))
-                        image3.paste(image, ((image3.width // 2) - center_x, (image3.height // 2) - center_y), image)
-
-                        image.close()
-                        del image
-
-                        image = image3
-
-                    pixels = image.load()
-                    # if render_by_timestamp[k][k2]['blend_mode'] == 2:
-                    #     for y in range(image.height):
-                    #         for x in range(image.width):
-                    #             pixels[x, y] = (255 - pixels[x, y][0], 255 - pixels[x, y][1], 255 - pixels[x, y][2], pixels[x, y][3])
-
-                    if render_by_timestamp[k][k2].get('opacity', 1.0) != 1.0:
-                        for y in range(image.height):
-                            for x in range(image.width):
-                                pixels[x, y] = (pixels[x, y][0], pixels[x, y][1], pixels[x, y][2], int(pixels[x, y][3] * render_by_timestamp[k][k2].get('opacity', 1.0)))
-
-                    new_w = image.width * render_by_timestamp[k][k2]['x_zoom']
-                    new_h = image.height * render_by_timestamp[k][k2]['y_zoom']
-
-                    if new_w < 0:
-                        image = image.transpose(Image.FLIP_LEFT_RIGHT)
-                        new_w = abs(new_w)
-
-                    if new_h < 0:
-                        image = image.transpose(Image.FLIP_TOP_BOTTOM)
-                        new_h = abs(new_h)
-
-                    new_w = round(new_w)
-                    new_h = round(new_h)
-
-                    if (new_w, new_h) != image.size:
-                        if new_w <= 0 or new_h <= 0:
-                            image = Image.new(image.mode, image.size, (0, 0, 0, 0))
-                        else:
-                            image = image.resize((new_w, new_h))
-
-                    if 'offset_x' in render_by_timestamp[k][k2]:
-                        image = ImageChops.offset(image, render_by_timestamp[k][k2]['offset_x'], 0)
-
-                    if 'offset_y' in render_by_timestamp[k][k2]:
-                        image = ImageChops.offset(image, 0, render_by_timestamp[k][k2]['offset_y'])
-
-                    if 'rotate' in render_by_timestamp[k][k2]:
-                        image = image.rotate(-render_by_timestamp[k][k2]['rotate'], expand=True)
-
-                    image2 = Image.new(render_frame.mode, render_frame.size, (0, 0, 0, 0))
-
-                    new_x = render_by_timestamp[k][k2]['x'] - (frame_width // 2)
-                    new_x = int(new_x + ((frame_width - image.width) // 2))
-
-                    new_y = render_by_timestamp[k][k2]['y'] - (frame_height // 2)
-                    new_y = int(new_y + ((frame_height - image.height) // 2))
-
-                    if render_by_timestamp[k][k2].get('tile', 0) == 1:
-                        for i in range(0, image2.width, image.width):
-                            for j in range(0, image2.height, image.height):
-                                image2.paste(image, (i, j))
-
-                    elif render_by_timestamp[k][k2].get('tile', 0) == 2:
-                        for i in range(0, image2.width, image.width):
-                            image2.paste(image, (i, new_y))
-
-                    elif render_by_timestamp[k][k2].get('tile', 0) == 3:
-                        for j in range(0, image2.height, image.height):
-                            image2.paste(image, (new_x, j))
-
-                    else:
-                        image2.paste(image, (new_x, new_y), image)
-
-                    if 'blend_mode' in render_by_timestamp[k][k2]:
-                        if render_by_timestamp[k][k2]['blend_mode'] == 1:
-                            render_frame = ImageChops.add(render_frame, image2)
-                            # render_frame = imageops.image_blend_2(image2, render_frame, render_by_timestamp[k][k2].get('opacity', 1.0), 1.0)
-
-                        elif render_by_timestamp[k][k2]['blend_mode'] == 2:
-                            render_frame = ImageChops.subtract(render_frame, image2)
-                            # render_frame = imageops.image_blend_2(image2, render_frame, render_by_timestamp[k][k2].get('opacity', 1.0), 1.0)
-                            # render_frame.paste(image2, (0, 0), image2)
-
-                        else:
-                            render_frame.paste(image2, (0, 0), image2)
-                            # render_frame = Image.alpha_composite(render_frame, image2)
-
-                    else:
-                        # render_frame.paste(image2, (0, 0), image2)
-                        render_frame = Image.alpha_composite(render_frame, image2)
-
-                    # image2.save("output_%d_%d.png" % (k2, k))
-
-                frames.append(render_frame)
-
             import imageio
             import numpy
             with imageio.get_writer(output_filename + ".mp4", mode='I', fps=60, quality=10, format='FFMPEG') as writer:
-                for frame in frames:
-                    writer.append_data(numpy.asarray(frame, dtype='uint8'))
+                print(frame_width, frame_height, total_start_frame, total_end_frame)
+                for k in sorted(render_by_timestamp.keys()):
+                    # if k < 0 or k > 800:
+                    #     continue
 
-            frames[0].save(output_filename + ".webp", format="webp", save_all=True, append_images=frames[1:], loop=0, lossless=True, quality=0, duration=round((1/60)*1000))
+                    print()
+                    print()
+
+                    render_frame = Image.new("RGBA", (frame_width * UPSCALE_RATIO, frame_height * UPSCALE_RATIO), (0, 0, 0, 0))
+                    for k2 in sorted(render_by_timestamp[k].keys())[::-1]:
+                        if not render_by_timestamp[k][k2] or 'filename' not in render_by_timestamp[k][k2]:
+                            continue
+
+                        print(k, k2, render_by_timestamp[k][k2])
+
+                        if isinstance(render_by_timestamp[k][k2]['filename'], Image.Image):
+                            image = render_by_timestamp[k][k2]['filename'].copy()
+
+                        else:
+                            if render_by_timestamp[k][k2]['filename'] not in sprite_images:
+                                print("Couldn't find", render_by_timestamp[k][k2]['filename'])
+                                continue
+
+                            image = sprite_images[render_by_timestamp[k][k2]['filename']][render_by_timestamp[k][k2]['clut']].copy()
+
+                        center_x = render_by_timestamp[k][k2].get('center_x', image.width // 2) * UPSCALE_RATIO
+                        center_y = render_by_timestamp[k][k2].get('center_y', image.height // 2) * UPSCALE_RATIO
+
+                        if center_x != image.width // 2 or center_y != image.height // 2:
+                            pos = ((image.width // 2) - center_x, (image.height // 2) - center_y)
+                            image3 = Image.new(image.mode, (image.width * 2, image.height * 2), (0, 0, 0, 0))
+                            image3.paste(image, ((image3.width // 2) - center_x, (image3.height // 2) - center_y), image)
+
+                            image.close()
+                            del image
+
+                            image = image3
+
+                        pixels = image.load()
+                        # if render_by_timestamp[k][k2]['blend_mode'] == 2:
+                        #     for y in range(image.height):
+                        #         for x in range(image.width):
+                        #             pixels[x, y] = (255 - pixels[x, y][0], 255 - pixels[x, y][1], 255 - pixels[x, y][2], pixels[x, y][3])
+
+                        if render_by_timestamp[k][k2].get('opacity', 1.0) != 1.0:
+                            for y in range(image.height):
+                                for x in range(image.width):
+                                    pixels[x, y] = (pixels[x, y][0], pixels[x, y][1], pixels[x, y][2], int(pixels[x, y][3] * render_by_timestamp[k][k2].get('opacity', 1.0)))
+
+                        new_w = image.width * render_by_timestamp[k][k2]['x_zoom']
+                        new_h = image.height * render_by_timestamp[k][k2]['y_zoom']
+
+                        if new_w < 0:
+                            image = image.transpose(Image.FLIP_LEFT_RIGHT)
+                            new_w = abs(new_w)
+
+                        if new_h < 0:
+                            image = image.transpose(Image.FLIP_TOP_BOTTOM)
+                            new_h = abs(new_h)
+
+                        new_w = round(new_w)
+                        new_h = round(new_h)
+
+                        if (new_w, new_h) != image.size:
+                            if new_w <= 0 or new_h <= 0:
+                                image = Image.new(image.mode, image.size, (0, 0, 0, 0))
+                            else:
+                                image = image.resize((new_w, new_h))
+
+                        if 'offset_x' in render_by_timestamp[k][k2]:
+                            image = ImageChops.offset(image, render_by_timestamp[k][k2]['offset_x'] * UPSCALE_RATIO, 0)
+
+                        if 'offset_y' in render_by_timestamp[k][k2]:
+                            image = ImageChops.offset(image, 0, render_by_timestamp[k][k2]['offset_y'] * UPSCALE_RATIO)
+
+                        if 'rotate' in render_by_timestamp[k][k2]:
+                            image = image.rotate(-render_by_timestamp[k][k2]['rotate'], expand=True)
+
+                        image2 = Image.new(render_frame.mode, render_frame.size, (0, 0, 0, 0))
+
+                        new_x = render_by_timestamp[k][k2]['x'] * UPSCALE_RATIO - (frame_width // 2)
+                        new_x = int(new_x + ((frame_width - image.width) // 2))
+
+                        new_y = render_by_timestamp[k][k2]['y'] * UPSCALE_RATIO - (frame_height // 2)
+                        new_y = int(new_y + ((frame_height - image.height) // 2))
+
+                        if render_by_timestamp[k][k2].get('tile', 0) == 1:
+                            for i in range(0, image2.width, image.width):
+                                for j in range(0, image2.height, image.height):
+                                    image2.paste(image, (i, j))
+
+                        elif render_by_timestamp[k][k2].get('tile', 0) == 2:
+                            for i in range(0, image2.width, image.width):
+                                image2.paste(image, (i, new_y))
+
+                        elif render_by_timestamp[k][k2].get('tile', 0) == 3:
+                            for j in range(0, image2.height, image.height):
+                                image2.paste(image, (new_x, j))
+
+                        else:
+                            image2.paste(image, (new_x, new_y), image)
+
+                        if 'blend_mode' in render_by_timestamp[k][k2]:
+                            if render_by_timestamp[k][k2]['blend_mode'] == 1:
+                                render_frame = ImageChops.add(render_frame, image2)
+                                # render_frame = imageops.image_blend_2(image2, render_frame, render_by_timestamp[k][k2].get('opacity', 1.0), 1.0)
+
+                            elif render_by_timestamp[k][k2]['blend_mode'] == 2:
+                                render_frame = ImageChops.subtract(render_frame, image2)
+                                # render_frame = imageops.image_blend_2(image2, render_frame, render_by_timestamp[k][k2].get('opacity', 1.0), 1.0)
+                                # render_frame.paste(image2, (0, 0), image2)
+
+                            else:
+                                render_frame.paste(image2, (0, 0), image2)
+                                # render_frame = Image.alpha_composite(render_frame, image2)
+
+                        else:
+                            # render_frame.paste(image2, (0, 0), image2)
+                            render_frame = Image.alpha_composite(render_frame, image2)
+
+                        # image2.save("output_%d_%d.png" % (k2, k))
+
+                    # frames.append(render_frame)
+                    writer.append_data(numpy.asarray(render_frame, dtype='uint8'))
+
+            # frames[0].save(output_filename + ".webp", format="webp", save_all=True, append_images=frames[1:], loop=0, lossless=True, quality=0, duration=round((1/60)*1000))
             # frames[0].save(output_filename + ".gif", format="gif", save_all=True, append_images=frames[1:], loop=0, lossless=True, quality=0, duration=round((1/60)*1000))
 
             for x in frames:
                 x.close()
                 del x
 
+
+def export_fcn_files(fcn_files, output_json_filename):
+    output_fcn_files = {}
+
+    for k in fcn_files:
+        if k.endswith(".obj") or k.endswith(".arr"):
+            output_filename = os.path.join("sprites", k)
+            open(output_filename, "wb").write(fcn_files[k])
+            output_fcn_files[k] = output_filename
+            continue
+
+        output_fcn_files[k] = {}
+
+        for k2 in fcn_files[k]:
+            output_filename = os.path.join("sprites", "%s_%d.png" % (k, k2))
+            fcn_files[k][k2].save(output_filename)
+            output_fcn_files[k][k2] = output_filename
+
+    import json
+    json.dump(output_fcn_files, open(output_json_filename, "w"))
+
+
+def upscale_sprites(fcn_files):
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as sprite_folder:
+        with tempfile.TemporaryDirectory() as upscaled_sprite_folder:
+            for k in fcn_files:
+                if k.endswith(".obj") or k.endswith(".arr"):
+                    continue
+
+                for k2 in fcn_files[k]:
+                    fcn_files[k][k2].save(os.path.join(sprite_folder, "%s_%d.png" % (k, k2)))
+
+            print("Upscaling using waifu2x (this will take a while)")
+
+            # Call waifu2x
+            import waifu2x_caffe
+            waifu2x = waifu2x_caffe.Waifu2xCaffe("C:\\Users\\Owner\\AppData\\Local\\video2x\\waifu2x-caffe\\waifu2x-caffe-cui.exe", "cudnn", "anime_style_art_rgb")
+            waifu2x.upscale(sprite_folder, upscaled_sprite_folder, UPSCALE_RATIO)
+
+            for k in fcn_files:
+                if k.endswith(".obj") or k.endswith(".arr"):
+                    continue
+
+                for k2 in fcn_files[k]:
+                    image = Image.open(os.path.join(upscaled_sprite_folder, "%s_%d.png" % (k, k2)))
+                    fcn_files[k][k2] = image.copy()
+                    image.close()
+
+    return fcn_files
+
 print("Converting", sys.argv[1])
 
 fcn_files = get_images_from_fcn(sys.argv[2])
+
+if UPSCALE_RATIO != 1:
+    fcn_files = upscale_sprites(fcn_files)
+
 obj_filename = [x for x in fcn_files if x.endswith('.obj')][0]
 filenames = parse_obj(fcn_files[obj_filename], fcn_files)
 
