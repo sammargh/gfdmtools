@@ -4,6 +4,7 @@ import struct
 import hexdump
 import imageio
 import numpy
+import tqdm
 
 from PIL import Image, ImageChops
 
@@ -14,11 +15,11 @@ def read_filelist_from_dat(infile, entry_count):
 
     # Skip over actual data so we can get to the file list
     for _ in range(0, entry_count):
-        first_block = infile.read(0x40)
+        infile.read(0x40)
 
         frame_count = struct.unpack("<I", infile.read(4))[0]
         for i in range(frame_count):
-            cur_block = infile.read(0x20)
+            infile.read(0x20)
 
     filename_count = struct.unpack("<I", infile.read(4))[0]
 
@@ -356,8 +357,7 @@ def animate_palette(cur_block, render_by_timestamp, sprite_filenames, anim_idx, 
     # Image-based animation
     if DEBUG_MODE:
         print("Sprite (palette type 5): %d frames per palette, %d palettes, flip mode %d" % (time_per_image, palette_colors, flip_mode))
-
-    print(sprite_filenames[anim_idx])
+        print(sprite_filenames[anim_idx])
 
     if time_per_image == 1:
         time_per_image = 45
@@ -517,8 +517,6 @@ def read_animation_from_dat(infile, entry_count, animation_filenames, sprite_fil
     render_by_timestamp = {}
     frame_width = 0
     frame_height = 0
-    total_start_frame = 0
-    total_end_frame = 0
 
     infile.seek(0x0c)
     for _ in range(0, entry_count):
@@ -569,8 +567,9 @@ def read_animation_from_dat(infile, entry_count, animation_filenames, sprite_fil
             continue
 
         if entry_type == 0:
-            if anim_id < len(animation_filenames):
-                print(animation_filenames[anim_id])
+            if DEBUG_MODE:
+                if anim_id < len(animation_filenames):
+                    print(animation_filenames[anim_id])
 
             base_images.append(animation_filenames[anim_id])
 
@@ -580,15 +579,15 @@ def read_animation_from_dat(infile, entry_count, animation_filenames, sprite_fil
         elif entry_type == 2:
             # Frame information
             frame_width, frame_height = struct.unpack("<HH", first_block[0x12:0x16])
-            total_start_frame = frame_start_timestamp
-            total_end_frame = frame_end_timestamp
             continue
 
         for i in range(frame_count):
             cur_block = infile.read(0x20)
             frames.append(cur_block)
 
-            hexdump.hexdump(cur_block)
+
+            if DEBUG_MODE:
+                hexdump.hexdump(cur_block)
 
             start_timestamp, end_timestamp, command, _, entry_idx, subcommand = struct.unpack("<IIHHHH", cur_block[:16])
 
@@ -661,10 +660,185 @@ def read_animation_from_dat(infile, entry_count, animation_filenames, sprite_fil
 
         fill_last_values(render_by_timestamp, entry_idx, frame_start_timestamp, frame_end_timestamp, base_images[-1], initial_alpha, initial_x, initial_y, initial_clut, initial_x_zoom, initial_y_zoom, initial_rotate, initial_center_x, initial_center_y, blend_mode, entry_id)
 
-    return render_by_timestamp, (frame_width, frame_height), (total_start_frame, total_end_frame)
+    return render_by_timestamp, (frame_width, frame_height)
 
 
-def parse_dat(dat_filename, output_filename, sprite_filenames, fcn_sprites, upscale_ratio=1, render_start_frame=-1, render_end_frame=-1):
+def do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites, rendered_frames):
+    if DEBUG_MODE:
+        print()
+
+    render_frame = Image.new("RGBA", (frame_width * upscale_ratio, frame_height * upscale_ratio), (0, 0, 0, 0))
+    for k2 in sorted(render_by_timestamp[k].keys())[::-1]:
+        if not render_by_timestamp[k][k2] or 'filename' not in render_by_timestamp[k][k2]:
+            continue
+
+        if DEBUG_MODE:
+            print(k, k2, render_by_timestamp[k][k2])
+
+        if isinstance(render_by_timestamp[k][k2]['filename'], Image.Image):
+            image = render_by_timestamp[k][k2]['filename'].copy()
+
+        else:
+            if render_by_timestamp[k][k2]['filename'] not in fcn_sprites:
+                print("Couldn't find", render_by_timestamp[k][k2]['filename'])
+                continue
+
+            image = fcn_sprites[render_by_timestamp[k][k2]['filename']][render_by_timestamp[k][k2]['clut']].copy()
+
+        center_x = render_by_timestamp[k][k2].get('center_x', image.width // 2) * upscale_ratio
+        center_y = render_by_timestamp[k][k2].get('center_y', image.height // 2) * upscale_ratio
+
+        if center_x != image.width // 2 or center_y != image.height // 2:
+            image3 = Image.new(image.mode, (image.width * 2, image.height * 2), (0, 0, 0, 0))
+            image3.paste(image, ((image3.width // 2) - center_x, (image3.height // 2) - center_y), image)
+
+            image.close()
+            del image
+
+            image = image3
+
+        pixels = image.load()
+        if render_by_timestamp[k][k2].get('opacity', 1.0) != 1.0:
+            for y in range(image.height):
+                for x in range(image.width):
+                    pixels[x, y] = (pixels[x, y][0], pixels[x, y][1], pixels[x, y][2], int(pixels[x, y][3] * render_by_timestamp[k][k2].get('opacity', 1.0)))
+
+        new_w = image.width * render_by_timestamp[k][k2]['x_zoom']
+        new_h = image.height * render_by_timestamp[k][k2]['y_zoom']
+
+        if new_w < 0:
+            image = image.transpose(Image.FLIP_LEFT_RIGHT)
+            new_w = abs(new_w)
+
+        if new_h < 0:
+            image = image.transpose(Image.FLIP_TOP_BOTTOM)
+            new_h = abs(new_h)
+
+        new_w = round(new_w)
+        new_h = round(new_h)
+
+        if (new_w, new_h) != image.size:
+            if new_w <= 0 or new_h <= 0:
+                image = Image.new(image.mode, image.size, (0, 0, 0, 0))
+            else:
+                image = image.resize((new_w, new_h))
+
+        if 'offset_x' in render_by_timestamp[k][k2]:
+            image = ImageChops.offset(image, render_by_timestamp[k][k2]['offset_x'] * upscale_ratio, 0)
+
+        if 'offset_y' in render_by_timestamp[k][k2]:
+            image = ImageChops.offset(image, 0, render_by_timestamp[k][k2]['offset_y'] * upscale_ratio)
+
+        if 'rotate' in render_by_timestamp[k][k2]:
+            image = image.rotate(-render_by_timestamp[k][k2]['rotate'], expand=True)
+
+        image2 = Image.new(render_frame.mode, render_frame.size, (0, 0, 0, 0))
+
+        new_x = render_by_timestamp[k][k2]['x'] * upscale_ratio - (frame_width // 2)
+        new_x = int(new_x + ((frame_width - image.width) // 2))
+
+        new_y = render_by_timestamp[k][k2]['y'] * upscale_ratio - (frame_height // 2)
+        new_y = int(new_y + ((frame_height - image.height) // 2))
+
+        if render_by_timestamp[k][k2].get('tile', 0) == 1:
+            for i in range(0, image2.width, image.width):
+                for j in range(0, image2.height, image.height):
+                    image2.paste(image, (i, j))
+
+        elif render_by_timestamp[k][k2].get('tile', 0) == 2:
+            for i in range(0, image2.width, image.width):
+                image2.paste(image, (i, new_y))
+
+        elif render_by_timestamp[k][k2].get('tile', 0) == 3:
+            for j in range(0, image2.height, image.height):
+                image2.paste(image, (new_x, j))
+
+        else:
+            image2.paste(image, (new_x, new_y), image)
+
+        if 'blend_mode' in render_by_timestamp[k][k2]:
+            if render_by_timestamp[k][k2]['blend_mode'] == 1:
+                render_frame = ImageChops.add(render_frame, image2)
+
+            elif render_by_timestamp[k][k2]['blend_mode'] == 2:
+                render_frame = ImageChops.subtract(render_frame, image2)
+
+            else:
+                render_frame.paste(image2, (0, 0), image2)
+
+        else:
+            render_frame = Image.alpha_composite(render_frame, image2)
+
+    rendered_frames[k] = render_frame
+
+    return render_frame
+
+
+def parse_dat_inner_single(render_by_timestamp, output_filename, fcn_sprites, frame_width, frame_height, upscale_ratio=1, render_start_frame=-1, render_end_frame=-1):
+    rendered_frames = {}
+
+    with imageio.get_writer(output_filename, mode='I', fps=60, quality=10, format='FFMPEG') as writer:
+        for k in tqdm.tqdm(sorted(render_by_timestamp.keys())):
+            do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites, rendered_frames)
+
+            npdata = numpy.asarray(rendered_frames[k], dtype='uint8')
+            writer.append_data(npdata)
+
+            rendered_frames[k].close()
+
+
+def parse_dat_inner_multi(render_by_timestamp, output_filename, fcn_sprites, frame_width, frame_height, upscale_ratio=1, render_start_frame=-1, render_end_frame=-1, max_threads=8):
+    rendered_frames = {}
+
+    import queue
+    import threading
+    def thread_worker():
+        while True:
+            item = queue_data.get()
+
+            if item is None:
+                break
+
+            render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites, rendered_frames = item
+            do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites, rendered_frames)
+
+            queue_data.task_done()
+
+    queue_data = queue.Queue()
+    threads = []
+    for _ in range(max_threads):
+        thread = threading.Thread(target=thread_worker)
+        thread.start()
+        threads.append(thread)
+
+    for k in render_by_timestamp:
+        # Only render frames within the specified range
+        if render_start_frame >= 0 and k < render_start_frame:
+            continue
+
+        if render_end_frame >= 0 and k > render_end_frame:
+            continue
+
+        queue_data.put((render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites, rendered_frames))
+
+    queue_data.join()
+
+    for _ in range(max_threads):
+        queue_data.put(None)
+
+    for thread in threads:
+        thread.join()
+
+    with imageio.get_writer(output_filename, mode='I', fps=60, quality=10, format='FFMPEG') as writer:
+        for k in sorted(rendered_frames, key=lambda x:int(x)):
+            render_frame = rendered_frames[k]
+            npdata = numpy.asarray(render_frame, dtype='uint8')
+            writer.append_data(npdata)
+
+            render_frame.close()
+
+
+def parse_dat(dat_filename, output_filename, sprite_filenames, fcn_sprites, upscale_ratio=1, render_start_frame=-1, render_end_frame=-1, max_threads=8):
     with open(dat_filename, "rb") as infile:
         if infile.read(4) != b"AEBG":
             print("Not a AEBG animation file")
@@ -673,134 +847,16 @@ def parse_dat(dat_filename, output_filename, sprite_filenames, fcn_sprites, upsc
         _, entry_count = struct.unpack("<II", infile.read(8))
 
         animation_filenames = read_filelist_from_dat(infile, entry_count)
-        render_by_timestamp, (frame_width, frame_height), (total_start_frame, total_end_frame) = read_animation_from_dat(infile, entry_count, animation_filenames, sprite_filenames, upscale_ratio)
+        render_by_timestamp, (frame_width, frame_height) = read_animation_from_dat(infile, entry_count, animation_filenames, sprite_filenames, upscale_ratio)
 
-    if fcn_sprites:
-        frames = []
+    import time
+    start_time = time.time()
 
-        with imageio.get_writer(output_filename + ".mp4", mode='I', fps=60, quality=10, format='FFMPEG') as writer:
-            print(frame_width, frame_height, total_start_frame, total_end_frame)
-            for k in sorted(render_by_timestamp.keys()):
-                # Only render frames within the specified range
-                if render_start_frame >= 0 and k < render_start_frame:
-                    continue
+    if max_threads == 1:
+        parse_dat_inner_single(render_by_timestamp, output_filename, fcn_sprites, frame_width, frame_height, upscale_ratio, render_start_frame, render_end_frame)
 
-                if render_end_frame >= 0 and k > render_end_frame:
-                    continue
+    else:
+        parse_dat_inner_multi(render_by_timestamp, output_filename, fcn_sprites, frame_width, frame_height, upscale_ratio, render_start_frame, render_end_frame, max_threads)
 
-                print()
-                print()
+    print(time.time() - start_time, "elapsed")
 
-                render_frame = Image.new("RGBA", (frame_width * upscale_ratio, frame_height * upscale_ratio), (0, 0, 0, 0))
-                for k2 in sorted(render_by_timestamp[k].keys())[::-1]:
-                    if not render_by_timestamp[k][k2] or 'filename' not in render_by_timestamp[k][k2]:
-                        continue
-
-                    print(k, k2, render_by_timestamp[k][k2])
-
-                    if isinstance(render_by_timestamp[k][k2]['filename'], Image.Image):
-                        image = render_by_timestamp[k][k2]['filename'].copy()
-
-                    else:
-                        if render_by_timestamp[k][k2]['filename'] not in fcn_sprites:
-                            print("Couldn't find", render_by_timestamp[k][k2]['filename'])
-                            continue
-
-                        image = fcn_sprites[render_by_timestamp[k][k2]['filename']][render_by_timestamp[k][k2]['clut']].copy()
-
-                    center_x = render_by_timestamp[k][k2].get('center_x', image.width // 2) * upscale_ratio
-                    center_y = render_by_timestamp[k][k2].get('center_y', image.height // 2) * upscale_ratio
-
-                    if center_x != image.width // 2 or center_y != image.height // 2:
-                        pos = ((image.width // 2) - center_x, (image.height // 2) - center_y)
-                        image3 = Image.new(image.mode, (image.width * 2, image.height * 2), (0, 0, 0, 0))
-                        image3.paste(image, ((image3.width // 2) - center_x, (image3.height // 2) - center_y), image)
-
-                        image.close()
-                        del image
-
-                        image = image3
-
-                    pixels = image.load()
-                    if render_by_timestamp[k][k2].get('opacity', 1.0) != 1.0:
-                        for y in range(image.height):
-                            for x in range(image.width):
-                                pixels[x, y] = (pixels[x, y][0], pixels[x, y][1], pixels[x, y][2], int(pixels[x, y][3] * render_by_timestamp[k][k2].get('opacity', 1.0)))
-
-                    new_w = image.width * render_by_timestamp[k][k2]['x_zoom']
-                    new_h = image.height * render_by_timestamp[k][k2]['y_zoom']
-
-                    if new_w < 0:
-                        image = image.transpose(Image.FLIP_LEFT_RIGHT)
-                        new_w = abs(new_w)
-
-                    if new_h < 0:
-                        image = image.transpose(Image.FLIP_TOP_BOTTOM)
-                        new_h = abs(new_h)
-
-                    new_w = round(new_w)
-                    new_h = round(new_h)
-
-                    if (new_w, new_h) != image.size:
-                        if new_w <= 0 or new_h <= 0:
-                            image = Image.new(image.mode, image.size, (0, 0, 0, 0))
-                        else:
-                            image = image.resize((new_w, new_h))
-
-                    if 'offset_x' in render_by_timestamp[k][k2]:
-                        image = ImageChops.offset(image, render_by_timestamp[k][k2]['offset_x'] * upscale_ratio, 0)
-
-                    if 'offset_y' in render_by_timestamp[k][k2]:
-                        image = ImageChops.offset(image, 0, render_by_timestamp[k][k2]['offset_y'] * upscale_ratio)
-
-                    if 'rotate' in render_by_timestamp[k][k2]:
-                        image = image.rotate(-render_by_timestamp[k][k2]['rotate'], expand=True)
-
-                    image2 = Image.new(render_frame.mode, render_frame.size, (0, 0, 0, 0))
-
-                    new_x = render_by_timestamp[k][k2]['x'] * upscale_ratio - (frame_width // 2)
-                    new_x = int(new_x + ((frame_width - image.width) // 2))
-
-                    new_y = render_by_timestamp[k][k2]['y'] * upscale_ratio - (frame_height // 2)
-                    new_y = int(new_y + ((frame_height - image.height) // 2))
-
-                    if render_by_timestamp[k][k2].get('tile', 0) == 1:
-                        for i in range(0, image2.width, image.width):
-                            for j in range(0, image2.height, image.height):
-                                image2.paste(image, (i, j))
-
-                    elif render_by_timestamp[k][k2].get('tile', 0) == 2:
-                        for i in range(0, image2.width, image.width):
-                            image2.paste(image, (i, new_y))
-
-                    elif render_by_timestamp[k][k2].get('tile', 0) == 3:
-                        for j in range(0, image2.height, image.height):
-                            image2.paste(image, (new_x, j))
-
-                    else:
-                        image2.paste(image, (new_x, new_y), image)
-
-                    if 'blend_mode' in render_by_timestamp[k][k2]:
-                        if render_by_timestamp[k][k2]['blend_mode'] == 1:
-                            render_frame = ImageChops.add(render_frame, image2)
-
-                        elif render_by_timestamp[k][k2]['blend_mode'] == 2:
-                            render_frame = ImageChops.subtract(render_frame, image2)
-
-                        else:
-                            render_frame.paste(image2, (0, 0), image2)
-
-                    else:
-                        render_frame = Image.alpha_composite(render_frame, image2)
-
-                    # image2.save("output_%d_%d.png" % (k2, k))
-
-                # frames.append(render_frame)
-                writer.append_data(numpy.asarray(render_frame, dtype='uint8'))
-
-        # frames[0].save(output_filename + ".webp", format="webp", save_all=True, append_images=frames[1:], loop=0, lossless=True, quality=0, duration=round((1/60)*1000))
-        # frames[0].save(output_filename + ".gif", format="gif", save_all=True, append_images=frames[1:], loop=0, lossless=True, quality=0, duration=round((1/60)*1000))
-
-        for x in frames:
-            x.close()
-            del x
