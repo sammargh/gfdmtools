@@ -12,7 +12,7 @@ if __name__ == "__main__":
     parser.add_argument('--upscale-ratio', help='Upscale ratio', type=int, default=1)
     parser.add_argument('--start-frame', help='Frame to start rendering', type=int, default=-1)
     parser.add_argument('--end-frame', help='Frame to end rendering', type=int, default=-1)
-    parser.add_argument('--threads', help='Number of threads to use for rendering', type=int, default=8)
+    #parser.add_argument('--threads', help='Number of threads to use for rendering', type=int, default=8)
     args = parser.parse_args()
 
     if not args.output:
@@ -23,4 +23,4 @@ if __name__ == "__main__":
     obj_filename = [x for x in fcn_files if x.endswith('.obj')][0]
     sprite_filenames = sprites.parse_obj(fcn_files[obj_filename], fcn_files)
 
-    animation.parse_dat(args.input_dat, args.output, sprite_filenames, fcn_files, args.upscale_ratio, args.start_frame, args.end_frame, args.threads)
+    animation.parse_dat(args.input_dat, args.output, sprite_filenames, fcn_files, args.upscale_ratio, args.start_frame, args.end_frame, 1)
