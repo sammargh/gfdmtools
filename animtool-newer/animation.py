@@ -213,16 +213,10 @@ def animate_sprite_raw(cur_block, render_by_timestamp, sprite_filenames, anim_id
 
         elif flip_mode == 2:
             if anim_frame_idx - 1 < 0:
-                if flip_val == 0:
-                    flip_val = 1
-                else:
-                    flip_val = 0
+                flip_val = 1
 
             elif anim_frame_idx + 1 >= anim_image_count:
-                if flip_val == 0:
-                    flip_val = -1
-                else:
-                    flip_val = 0
+                flip_val = -1
 
             anim_frame_idx += flip_val
 
