@@ -82,7 +82,7 @@ def subcommand_0_animate_zoom(cur_block, render_by_timestamp, entry_idx, start_t
     end_x_zoom /= 4096
     end_y_zoom /= 4096
 
-    for idx in range(cur_block, start_timestamp, end_timestamp if end_timestamp <= frame_end_timestamp else frame_end_timestamp):
+    for idx in range(start_timestamp, end_timestamp if end_timestamp <= frame_end_timestamp else frame_end_timestamp):
         cur_x_zoom = start_x_zoom + (idx - start_timestamp) * ((end_x_zoom - start_x_zoom) / ((end_timestamp - 1) - start_timestamp))
         cur_y_zoom = start_y_zoom + (idx - start_timestamp) * ((end_y_zoom - start_y_zoom) / ((end_timestamp - 1) - start_timestamp))
 
