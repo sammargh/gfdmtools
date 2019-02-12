@@ -663,7 +663,7 @@ def read_animation_from_dat(infile, entry_count, animation_filenames, sprite_fil
     return render_by_timestamp, (frame_width, frame_height)
 
 
-def do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites, rendered_frames):
+def do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites):
     if DEBUG_MODE:
         print()
 
@@ -697,8 +697,8 @@ def do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_rati
 
             image = image3
 
-        pixels = image.load()
         if render_by_timestamp[k][k2].get('opacity', 1.0) != 1.0:
+            pixels = image.load()
             for y in range(image.height):
                 for x in range(image.width):
                     pixels[x, y] = (pixels[x, y][0], pixels[x, y][1], pixels[x, y][2], int(pixels[x, y][3] * render_by_timestamp[k][k2].get('opacity', 1.0)))
@@ -769,8 +769,6 @@ def do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_rati
         else:
             render_frame = Image.alpha_composite(render_frame, image2)
 
-    rendered_frames[k] = render_frame
-
     return render_frame
 
 
@@ -779,12 +777,10 @@ def parse_dat_inner_single(render_by_timestamp, output_filename, fcn_sprites, fr
 
     with imageio.get_writer(output_filename, mode='I', fps=60, quality=10, format='FFMPEG') as writer:
         for k in tqdm.tqdm(sorted(render_by_timestamp.keys())):
-            do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites, rendered_frames)
+            rendered_frame = do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites)
 
-            npdata = numpy.asarray(rendered_frames[k], dtype='uint8')
+            npdata = numpy.asarray(rendered_frame, dtype='uint8')
             writer.append_data(npdata)
-
-            rendered_frames[k].close()
 
 
 def parse_dat_inner_multi(render_by_timestamp, output_filename, fcn_sprites, frame_width, frame_height, upscale_ratio=1, render_start_frame=-1, render_end_frame=-1, max_threads=8):
@@ -794,13 +790,12 @@ def parse_dat_inner_multi(render_by_timestamp, output_filename, fcn_sprites, fra
     import threading
     def thread_worker():
         while True:
-            item = queue_data.get()
+            k = queue_data.get()
 
-            if item is None:
+            if k is None:
                 break
 
-            render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites, rendered_frames = item
-            do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites, rendered_frames)
+            rendered_frames[k] = do_render_frame(render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites)
 
             queue_data.task_done()
 
@@ -819,7 +814,7 @@ def parse_dat_inner_multi(render_by_timestamp, output_filename, fcn_sprites, fra
         if render_end_frame >= 0 and k > render_end_frame:
             continue
 
-        queue_data.put((render_by_timestamp, frame_width, frame_height, upscale_ratio, k, fcn_sprites, rendered_frames))
+        queue_data.put((k))
 
     queue_data.join()
 
