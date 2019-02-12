@@ -1,6 +1,6 @@
 # animtool-newer
 
-This is for Guitar Freaks 9th/Drummania 8th and above on the System 573 hardware. Older games will not work.
+This is for Guitar Freaks 8th/Drummania 7th and above on the System 573 hardware. Older games will not work.
 
 If you want to use upscaling then run video2x_setup.py first. This will set up everything required for waifu2x upscaling (Windows only). Rendering upscaled videos will be much slower than native resolution videos, and the quality will vary depending on how well the upscaling algorithm worked.
 
