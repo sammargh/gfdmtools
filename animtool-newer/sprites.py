@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import re
 import struct
@@ -89,7 +90,7 @@ def parse_sprite_sheet(filename, fcn_files):
     return output
 
 
-def get_images_from_fcn(filename, upscale_ratio=1):
+def get_images_from_fcn(filename, upscale_ratio=1, upscale_method="cudnn"):
     output_files = {}
 
     # Prase filetable in FCN file
@@ -150,13 +151,23 @@ def get_images_from_fcn(filename, upscale_ratio=1):
                     output_images[filename][clut] = image
 
     if upscale_ratio != 1:
-        output_images = upscale_sprites(output_images, upscale_ratio)
+        output_images = upscale_sprites(output_images, upscale_ratio, upscale_method)
 
     return output_images
 
 
-def upscale_sprites(fcn_files, upscale_ratio):
+def upscale_sprites(fcn_files, upscale_ratio, upscale_method):
     if upscale_ratio == 1:
+        return fcn_files
+
+    if not os.path.exists("video2x.json"):
+        print("Couldn't find video2x.json, skipping upscaling...")
+        return fcn_files
+
+    video2x_config = json.load(open("video2x.json", "r"))
+
+    if 'waifu2x_path' not in video2x_config:
+        print("Couldn't find waifu2x_path in video2x.json, skipping upscaling...")
         return fcn_files
 
     with tempfile.TemporaryDirectory() as sprite_folder:
@@ -170,9 +181,11 @@ def upscale_sprites(fcn_files, upscale_ratio):
 
             print("Upscaling using waifu2x (this will take a while)")
 
+            json.load
+
             # Call waifu2x
             import waifu2x_caffe
-            waifu2x = waifu2x_caffe.Waifu2xCaffe("C:\\Users\\Owner\\AppData\\Local\\video2x\\waifu2x-caffe\\waifu2x-caffe-cui.exe", "cudnn", "anime_style_art_rgb")
+            waifu2x = waifu2x_caffe.Waifu2xCaffe(video2x_config['waifu2x_path'], upscale_method, "anime_style_art_rgb")
             waifu2x.upscale(sprite_folder, upscaled_sprite_folder, upscale_ratio)
 
             for k in fcn_files:
