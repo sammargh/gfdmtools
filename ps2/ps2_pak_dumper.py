@@ -144,15 +144,16 @@ class PakDumper:
 
         return packlist
 
+    def rol(self, val, r_bits):
+        return (val << r_bits) & 0xFFFFFFFF | ((val & 0xFFFFFFFF) >> (32 - r_bits))
 
     def decrypt(self, data, key1, key2):
-        rol = lambda val, r_bits: (val << r_bits % 32) & (2 ** 32 - 1) | ((val & (2 ** 32 - 1)) >> (32 - (r_bits % 32)))
-
         # This is where the slowdown happens when decrypting data.
         # TODO: Rewrite to be faster.
         key = key1
+
         for i in range(0, int(len(data) / 4) * 4, 4):
-            key = rol(key + key2, 3)
+            key = self.rol(key + key2, 3)
             a, b, c, d = struct.unpack("<BBBB", struct.pack("I", key))
 
             data[i] ^= a
@@ -162,7 +163,7 @@ class PakDumper:
 
         i += 4
 
-        parts = struct.unpack("<BBBB", struct.pack("I", rol(key + key2, 3)))
+        parts = struct.unpack("<BBBB", struct.pack("I", self.rol(key + key2, 3)))
         for j in range(len(data) - i):
                 data[i] ^= parts[j]
 
