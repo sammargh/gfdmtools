@@ -26,7 +26,6 @@ def demux_pss(input_filename, output_folder):
 
             elif header == bytearray([0x00, 0x00, 0x01, 0xb9]):
                 # MPEG end
-                print("Found EOF")
                 break
 
             elif header == bytearray([0x00, 0x00, 0x01, 0xbb]):
@@ -42,14 +41,13 @@ def demux_pss(input_filename, output_folder):
                     streamType = (data[idx+0x10] + data[idx+0x12]) & 0xf0
                     streamId = (data[idx+0x10] + data[idx+0x12]) & 0x0f
 
-                    print("Found audio: stream id %02x, stream type: %02x" % (streamId, streamType))
-
                     if streamType != 0x90:
                         print("Found unexpected audio stream type @ %08x" % (idx - 4))
                         exit(1)
 
                     if streamId not in audio_outputs:
-                        audio_outputs[streamId] = open(os.path.join(output_folder, "%s_%d.at3" % (base_filename, streamId)), "wb")
+                        part = ["___k", "__bk", "_gbk", "d__k", "d_bk"][streamId - 1]
+                        audio_outputs[streamId] = open(os.path.join(output_folder, "%s%s.at3" % (base_filename, part)), "wb")
 
                     dataLen = int.from_bytes(data[idx:idx+2], byteorder="big")
                     headerOffset = int.from_bytes(data[idx+4:idx+5], byteorder="little")
@@ -60,8 +58,6 @@ def demux_pss(input_filename, output_folder):
                     idx += dataLen
 
                 elif header[3] >= 0xe0 and header[3] <= 0xef:
-                    print("Found video @ %08x" % idx)
-
                     dataLen = int.from_bytes(data[idx:idx+2], byteorder="big")
                     headerOffset = int.from_bytes(data[idx+4:idx+5], byteorder="little")
                     dataLen -= headerOffset + 3
@@ -71,11 +67,9 @@ def demux_pss(input_filename, output_folder):
                     idx += dataLen
 
                 else:
-                    print("Unknown header @ %08x!" % (idx-4))
                     exit(1)
 
             else:
-                print("Unknown header @ %08x!" % (idx-4))
                 exit(1)
 
     for k in audio_outputs:

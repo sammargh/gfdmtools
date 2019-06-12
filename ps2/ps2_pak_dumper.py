@@ -7,11 +7,11 @@ import struct
 from ctypes import c_ulong
 
 class PakDumper:
-    def __init__(self, packinfo, encryption):
+    def __init__(self, packinfo, demux):
         self.entries = self.parse_pack_data(packinfo)
         self.packlist = self.generate_packlist()
         self.crc32_tab = self.generate_crc32_table()
-        self.encryption = encryption
+        self.demux = demux
 
 
     def generate_crc32_table(self):
@@ -178,6 +178,11 @@ class PakDumper:
             os.makedirs(os.path.dirname(output_path))
 
         open(output_path, "wb").write(decrypted)
+
+        if self.demux and os.path.splitext(output_path)[1].lower() == ".pss":
+            from pss_demux import demux_pss
+            demux_pss(output_path, os.path.dirname(output_path))
+
         return True
 
 
@@ -257,6 +262,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('-i', '--input', help='Input folder', required=True)
     parser.add_argument('-o', '--output', help='Output folder (optional)', default="output")
+    parser.add_argument('-d', '--demux', help='Demux PSS files', default=False, action="store_true")
 
     args = parser.parse_args()
 
@@ -266,7 +272,7 @@ if __name__ == "__main__":
         print("Couldn't find packinfo.bin in input directory")
         exit(1)
 
-    dumper = PakDumper(packinfo_path, False)
+    dumper = PakDumper(packinfo_path, args.demux)
     filenames = bruteforce_filenames(dumper)
 
     for path in filenames:
