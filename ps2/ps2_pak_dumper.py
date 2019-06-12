@@ -232,7 +232,7 @@ def bruteforce_filenames(dumper):
         "/data/product/music/m%04d/b%04dd_bk.at3",
     ]
 
-    for i in range(0, 1100):
+    for i in range(0, 3000):
         for template in templates:
             path = template % tuple(i for _ in range(template.count("%04d")))
 
