@@ -166,6 +166,7 @@ class PakDumper:
             decrypted = data
 
         if self.get_md5sum(data) != entry['md5sum']:
+            print("Bad checksum for", path)
             return False
 
         if path.startswith('/'):
