@@ -64,7 +64,7 @@ class PakDumper:
         packlist = []
 
         cur_folder = 0
-        for i in range(0, 1000):
+        for i in range(0, 3000):
             if (i % 30) == 0 and i > 0:
                 cur_folder += 1
 
