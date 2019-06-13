@@ -144,8 +144,10 @@ class PakDumper:
 
         return packlist
 
+
     def rol(self, val, r_bits):
         return (val << r_bits) & 0xFFFFFFFF | ((val & 0xFFFFFFFF) >> (32 - r_bits))
+
 
     def decrypt(self, data, key1, key2):
         # This is where the slowdown happens when decrypting data.
