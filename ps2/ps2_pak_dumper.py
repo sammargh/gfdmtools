@@ -7,11 +7,12 @@ import struct
 from ctypes import c_ulong
 
 class PakDumper:
-    def __init__(self, packinfo, demux):
+    def __init__(self, packinfo, demux, fast):
         self.entries = self.parse_pack_data(packinfo)
         self.packlist = self.generate_packlist()
         self.crc32_tab = self.generate_crc32_table()
         self.demux = demux
+        self.fast = fast
 
 
     def generate_crc32_table(self):
@@ -150,22 +151,26 @@ class PakDumper:
 
 
     def decrypt(self, data, key1, key2):
-        # This is where the slowdown happens when decrypting data.
-        # TODO: Rewrite to be faster.
+        if self.fast:
+            # Uses a Cython module for fast decryption
+            import pakdec
+            pakdec.decrypt(data, key1, key2)
+            return data
+
         key = key1
 
         for i in range(0, int(len(data) / 4) * 4, 4):
             key = self.rol(key + key2, 3)
-            a, b, c, d = struct.unpack("<BBBB", struct.pack("I", key))
 
-            data[i] ^= a
-            data[i + 1] ^= b
-            data[i + 2] ^= c
-            data[i + 3] ^= d
+            data[i] ^= key & 0xff
+            data[i + 1] ^= (key >> 8) & 0xff
+            data[i + 2] ^= (key >> 16) & 0xff
+            data[i + 3] ^= (key >> 24) & 0xff
 
         i += 4
 
-        parts = struct.unpack("<BBBB", struct.pack("I", self.rol(key + key2, 3)))
+        key = self.rol(key + key2, 3)
+        parts = [key & 0xff, (key >> 8) & 0xff, (key >> 16) & 0xff, (key >> 24) & 0xff]
         for j in range(len(data) - i):
                 data[i] ^= parts[j]
 
@@ -314,6 +319,7 @@ if __name__ == "__main__":
     parser.add_argument('-i', '--input', help='Input folder', required=True)
     parser.add_argument('-o', '--output', help='Output folder (optional)', default="output")
     parser.add_argument('-d', '--demux', help='Demux PSS files', default=False, action="store_true")
+    parser.add_argument('-f', '--fast', help='Use Cython decryption code', default=False, action="store_true")
 
     args = parser.parse_args()
 
@@ -323,7 +329,7 @@ if __name__ == "__main__":
         print("Couldn't find packinfo.bin in input directory")
         exit(1)
 
-    dumper = PakDumper(packinfo_path, args.demux)
+    dumper = PakDumper(packinfo_path, args.demux, args.fast)
 
     filenames = bruteforce_filenames(dumper)
 
