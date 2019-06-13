@@ -19,7 +19,6 @@ cpdef decrypt(unsigned char *data, size_t data_len, unsigned int key1, unsigned 
 
     key = rol(key + key2, 3)
     key_parts = [key & 0xff, (key >> 8) & 0xff, (key >> 16) & 0xff, (key >> 24) & 0xff]
-    print("%04x" % (data_len - i))
     for j in range(data_len - i):
             data[i] ^= key_parts[j]
 
