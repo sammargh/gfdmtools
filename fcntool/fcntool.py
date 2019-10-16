@@ -176,4 +176,4 @@ if __name__ == "__main__":
     if not os.path.exists(args.output):
         os.makedirs(args.output)
 
-    export_fcn_files(get_images_from_fcn(args.input), args.output_folder)
+    export_fcn_files(get_images_from_fcn(args.input), args.output)
