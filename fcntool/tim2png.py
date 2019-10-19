@@ -242,5 +242,5 @@ if __name__ == "__main__":
         sys.exit(1)
 
     # Write output image
-    image.save(outputFileName, "PNG")
+    image[0].save(outputFileName, "PNG")
     print("Written '%s'" % outputFileName)

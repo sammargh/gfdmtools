@@ -1,5 +1,6 @@
 import argparse
 import io
+import glob
 import json
 import os
 import re
@@ -8,10 +9,9 @@ import tempfile
 
 from PIL import Image
 
-import tim2png
-
 
 def parse_sprite_sheet(filename, fcn_files):
+    import tim2png
     _, cluts = tim2png.readTimImage(io.BytesIO(fcn_files[filename]), 0)
 
     if '@' in filename:
@@ -79,12 +79,12 @@ def parse_sprite_sheet(filename, fcn_files):
     return output
 
 
-def get_images_from_fcn(filename):
+def get_files_from_fcn(filename):
     output_files = {}
 
-    # Prase filetable in FCN file
+    # Parse filetable in FCN file
     with open(filename, "rb") as infile:
-        filesize, _, filetable_size, _ = struct.unpack("<IIII", infile.read(16))
+        filesize, _, filetable_size, data_size = struct.unpack("<IIII", infile.read(16))
 
         is_new_format = False
         if filesize & 0x08000000 != 0:
@@ -117,6 +117,13 @@ def get_images_from_fcn(filename):
 
             else:
                 output_files[filename] = data
+
+    return output_files
+
+
+def get_images_from_fcn(filename):
+    import tim2png
+    output_files = get_files_from_fcn(filename)
 
     # Actually read in the images
     output_images = {}
@@ -163,17 +170,75 @@ def export_fcn_files(fcn_files, output_folder, output_json_filename=None):
         json.dump(output_fcn_files, open(output_json_filename, "w"))
 
 
+def main(args_input, args_output, args_convert):
+    if os.path.isfile(args_input):
+        if not args_output:
+            args_output = os.path.splitext(os.path.basename())[0]
+
+        if not os.path.exists(args_output):
+            os.makedirs(args_output)
+
+        if args_convert:
+            export_fcn_files(get_images_from_fcn(args_input), args_output)
+
+        else:
+            output_files = get_files_from_fcn(args_input)
+
+            for filename in output_files:
+                with open(os.path.join(args_output, filename), "wb") as outfile:
+                    outfile.write(output_files[filename])
+
+    else:
+        filenames = sorted(glob.glob(os.path.join(args_input, "**", "*"), recursive=True))
+
+        filetable_data = bytearray()
+        main_data = bytearray()
+
+        cur_offset = 0
+        for filename in filenames:
+            base_filename = os.path.basename(filename)
+
+            if not os.path.splitext(base_filename)[1]:
+                base_filename += ".tim"
+
+            base_filename += " " * (32 - len(base_filename))
+            filesize = os.path.getsize(filename)
+
+            filetable_data += base_filename.encode('ascii')
+            filetable_data += int.to_bytes(cur_offset, length=4, byteorder="little")
+            filetable_data += int.to_bytes(filesize, length=4, byteorder="little")
+
+            main_data += open(filename, "rb").read()
+
+            cur_offset += filesize
+
+        with open(args_output, "wb") as outfile:
+            # outfile.write(int.to_bytes(len(filetable_data) + len(main_data) + 0x10, length=4, byteorder="little"))
+            # outfile.write(int.to_bytes(0x10, length=1, byteorder="little"))
+            # outfile.write(int.to_bytes(len(filenames), length=1, byteorder="little"))
+            # outfile.write(int.to_bytes(0x00, length=1, byteorder="little"))
+            # outfile.write(int.to_bytes(0x00, length=1, byteorder="little"))
+            # outfile.write(int.to_bytes(len(filetable_data), length=4, byteorder="little"))
+            # outfile.write(int.to_bytes(len(main_data), length=4, byteorder="little"))
+            # outfile.write(filetable_data)
+            # outfile.write(main_data)
+
+            outfile.write(int.to_bytes(len(filenames), length=3, byteorder="little"))
+            outfile.write(int.to_bytes(0x08, length=1, byteorder="little"))
+            outfile.write(int.to_bytes(len(filetable_data), length=3, byteorder="little"))
+            outfile.write(int.to_bytes(0x10, length=1, byteorder="little"))
+            outfile.write(int.to_bytes(len(main_data), length=4, byteorder="little"))
+            outfile.write(int.to_bytes(len(filetable_data) + len(main_data) + 0x10, length=4, byteorder="little"))
+            outfile.write(filetable_data)
+            outfile.write(main_data)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument('-i', '--input', help='Input FCN', required=True)
-    parser.add_argument('-o', '--output', help='Output folder (optional)', default="")
+    parser.add_argument('-i', '--input', help='Input FCN/folder', required=True)
+    parser.add_argument('-o', '--output', help='Output FCN/folder (optional)', default="")
+    parser.add_argument('-c', '--convert', help='Convert images', default=False, action='store_true')
 
     args = parser.parse_args()
 
-    if not args.output:
-        args.output = os.path.splitext(os.path.basename())[0]
-
-    if not os.path.exists(args.output):
-        os.makedirs(args.output)
-
-    export_fcn_files(get_images_from_fcn(args.input), args.output_folder)
+    main(args.input, args.output, args.convert)
