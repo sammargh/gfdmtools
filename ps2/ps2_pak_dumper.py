@@ -160,9 +160,9 @@ class PakDumper:
                     'md5sum': md5sum,
                 }
 
-                if key1 in entries:
-                    print("Found key already")
-                    exit(1)
+                if key1 in entries and entries[key1]['key2'] == key2:
+                    print("Found key already:", entries[key1])
+                    continue
 
                 entries[key1] = entry
 
@@ -288,21 +288,7 @@ class PakDumper:
 
 
 def bruteforce_filenames(dumper):
-    filenames = [
-        "/data/product/music/course_info.bin",
-        "/data/product/music/jp_title.bin",
-        "/data/product/music/music_info.bin",
-        "/data/product/music/net_id.bin",
-        # "/data/pack/packinfo.bin",
-        "/data/product/music/system/se.va2",
-        "/data/product/music/system/ealogo_gf.pss",
-        # "/dev/nvram/config.xml",
-        # "/dev/nvram/network.xml",
-        # "/BISLPM-66575gfdmv2/gfdm.ico",
-        # "/BISLPM-66575gfdmv2/icon.sys",
-        "/data/product/icon/gfdm.ico",
-        "/data/product/icon/icon.sys",
-    ]
+    filenames = []
 
     templates = [
         "/data/product/music/m%04d/d%04d.sq2",
@@ -367,6 +353,27 @@ def bruteforce_filenames(dumper):
     for i in range(0, 100):
         path = "/data/product/music/system/gfv_v%02d.va2" % i
 
+        if dumper.file_exists(path):
+            filenames.append(path)
+
+    possible_filenames = [
+        "/data/product/music/course_info.bin",
+        "/data/product/music/jp_title.bin",
+        "/data/product/music/music_info.bin",
+        "/data/product/music/net_id.bin",
+        "/data/pack/packinfo.bin",
+        "/data/product/music/system/se.va2",
+        "/data/product/music/system/ealogo_gf.pss",
+        "/dev/nvram/config.xml",
+        "/dev/nvram/network.xml",
+        "/BISLPM-66575gfdmv2/gfdm.ico",
+        "/BISLPM-66575gfdmv2/icon.sys",
+        "/data/product/icon/gfdm.ico",
+        "/data/product/icon/icon.sys",
+        "/data/product/music/mdb.bin",
+    ]
+
+    for path in possible_filenames:
         if dumper.file_exists(path):
             filenames.append(path)
 
