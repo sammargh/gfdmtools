@@ -198,7 +198,7 @@ class PakDumper:
         if self.fast:
             # Uses a Cython module for fast decryption
             import pakdec
-            pakdec.decrypt(data, key1, key2)
+            pakdec.decrypt(data, len(data), key1, key2)
             return data
 
         key = key1
@@ -234,7 +234,7 @@ class PakDumper:
         return md5.digest()
 
 
-    def extract_data(self, path):
+    def extract_data(self, path, input_path, output_path):
         filename_hash = self.calculate_filename_hash(path)
 
         if filename_hash not in self.entries:
@@ -250,6 +250,8 @@ class PakDumper:
         packpath = self.packlist[entry['packid']]
         if packpath.startswith('/'):
             packpath = packpath[1:]
+
+        packpath = os.path.join(input_path, packpath)
 
         if not os.path.exists(packpath):
             print("Could not find %s" % packpath)
@@ -273,7 +275,7 @@ class PakDumper:
         if path.startswith('/'):
             path = path[1:]
 
-        output_path = os.path.join("output", path)
+        output_path = os.path.join(output_path, path)
 
         if not os.path.exists(os.path.dirname(output_path)):
             os.makedirs(os.path.dirname(output_path))
@@ -336,6 +338,8 @@ def bruteforce_filenames(dumper):
         "/data/product/music/m%04d/b%04d_gbk.at3",
         "/data/product/music/m%04d/b%04dd__k.at3",
         "/data/product/music/m%04d/b%04dd_bk.at3",
+
+        "/data/product/movie/music/mv%04d.m2v",
     ]
 
     for i in range(0, 3000):
@@ -351,12 +355,25 @@ def bruteforce_filenames(dumper):
                     filenames.append(path)
 
     for i in range(0, 100):
-        path = "/data/product/music/system/gfv_v%02d.va2" % i
+        for j in range(0, 100):
+            for ext in ['va2', 'va3']:
+                path = "/data/product/music/system/gfv%d_v%02d.%s" % (i, j, ext)
 
-        if dumper.file_exists(path):
-            filenames.append(path)
+                if dumper.file_exists(path):
+                    filenames.append(path)
+
+        for ext in ['va2', 'va3']:
+            path = "/data/product/music/system/gfv%d_se.%s" % (i, ext)
+            if dumper.file_exists(path):
+                filenames.append(path)
+
+            path = "/data/product/music/system/gfv_v%02d.%s" % (i, ext)
+            if dumper.file_exists(path):
+                filenames.append(path)
 
     possible_filenames = [
+        "/data/product/music/system/gfv_se.va2",
+        "/data/product/music/system/gfv_se.va3",
         "/data/product/music/course_info.bin",
         "/data/product/music/jp_title.bin",
         "/data/product/music/music_info.bin",
@@ -371,6 +388,44 @@ def bruteforce_filenames(dumper):
         "/data/product/icon/gfdm.ico",
         "/data/product/icon/icon.sys",
         "/data/product/music/mdb.bin",
+        "/data/product/music/mdb.xml",
+        "/data/product/music/mdb_xg.xml",
+        "/data/product/music/mdb_xg.bin",
+        "/data/product/music/mdbe.bin",
+        "/data/product/music/mdbe.xml",
+        "/data/product/music/mdbe_xg.xml",
+        "/data/product/music/mdbe_xg.bin",
+        "/data/product/mdb.bin",
+        "/data/product/mdb.xml",
+        "/data/product/mdb_xg.xml",
+        "/data/product/mdb_xg.bin",
+        "/data/product/mdbe.bin",
+        "/data/product/mdbe.xml",
+        "/data/product/mdbe_xg.xml",
+        "/data/product/mdbe_xg.bin",
+        "/data/product/xml/mdbe_xg.xml",
+        "/data/product/xml/mdbe_xg.bin",
+        "/data/product/xml/mdbe.bin",
+        "/data/product/xml/mdbe.xml",
+        "/data/product/xml/mdbe_xg.xml",
+        "/data/product/xml/mdbe_xg.bin",
+        "/data/product/xml/mdbe.bin",
+        "/data/product/xml/mdbe.xml",
+        "/data/product/font/font16x16x8/0_0.img",
+        "/data/product/font/font16x16x8/0_1.img",
+        "/data/product/font/font16x16x8/1_0.img",
+        "/data/product/font/font16x16x8/1_1.img",
+        "/data/product/font/font16x16x8/1_2.img",
+        "/data/product/font/font16x16x8/1_3.img",
+        "/data/product/font/font16x16x8/2_0.img",
+        "/data/product/font/font16x16x8/2_1.img",
+        "/data/product/font/font16x16x8/2_2.img",
+        "/data/product/font/font16x16x8/2_3.img",
+        "/data/product/font/font16x16x8/3_0.img",
+        "/data/product/font/font16x16x8/3_1.img",
+        "/data/product/font/font16x16x8/3_2.img",
+        "/data/product/font/font16x16x8/3_3.img",
+        "/data/product/font/DFHSG7.TTC",
     ]
 
     for path in possible_filenames:
@@ -415,4 +470,4 @@ if __name__ == "__main__":
             path = path[1:]
 
         print("Extracting {}...".format(path))
-        dumper.extract_data(path)
+        dumper.extract_data(path, args.input, args.output)
