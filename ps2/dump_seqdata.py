@@ -1,3 +1,4 @@
+import argparse
 import ctypes
 import os
 
@@ -217,63 +218,203 @@ def decode_lz(input_data):
 
     return output
 
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-i', '--input', help='Input file', required=True)
+    parser.add_argument('-o', '--output', help='Output folder (optional)', default="output")
 
-filename_lookup = {}
+    args = parser.parse_args()
 
-for i in range(0, 1000):
-    filename = "seq%03d" % (i)
-    filename_lookup[get_filename_hash(filename)] = filename
+    base_filename = os.path.basename(args.input)
 
-    for p in ["", "prac", "easy", "norm", "real", "expr", "lnkn", "lnkx", "bnus"]:
-        filename = "seq%03d%s" % (i, p)
-        filename_lookup[get_filename_hash(filename)] = filename
+    filename_table = None
+    if base_filename == "d_seq.dat":
+        filename_table = [
+            "seq013prac.dsq",
+            "seq020lnkn.dsq",
+            "seq020lnkx.dsq",
+            "seq020norm.dsq",
+            "seq020real.dsq",
+            "seq021expr.dsq",
+            "seq021lnkn.dsq",
+            "seq021lnkx.dsq",
+            "seq021norm.dsq",
+            "seq021real.dsq",
+            "seq022expr.dsq",
+            "seq022lnkn.dsq",
+            "seq022lnkx.dsq",
+            "seq022real.dsq",
+            "seq023expr.dsq",
+            "seq023lnkn.dsq",
+            "seq023lnkx.dsq",
+            "seq023norm.dsq",
+            "seq023real.dsq",
+            "seq024expr.dsq",
+            "seq024lnkn.dsq",
+            "seq024lnkx.dsq",
+            "seq024norm.dsq",
+            "seq100expr.dsq",
+            "seq100lnkn.dsq",
+            "seq100lnkx.dsq",
+            "seq100norm.dsq",
+            "seq100real.dsq",
+            "seq101expr.dsq",
+            "seq101lnkn.dsq",
+            "seq101lnkx.dsq",
+            "seq101norm.dsq",
+            "seq101real.dsq",
+            "seq102expr.dsq",
+            "seq102lnkn.dsq",
+            "seq102lnkx.dsq",
+            "seq102real.dsq",
+            "seq103expr.dsq",
+            "seq103lnkn.dsq",
+            "seq103lnkx.dsq",
+            "seq103norm.dsq",
+            "seq103real.dsq",
+            "seq104easy.dsq",
+            "seq104expr.dsq",
+            "seq104lnkn.dsq",
+            "seq104lnkx.dsq",
+            "seq104norm.dsq",
+            "seq104prac.dsq",
+            "seq104real.dsq",
+            "seq105expr.dsq",
+            "seq105lnkn.dsq",
+            "seq105lnkx.dsq",
+            "seq105real.dsq",
+            "seq106expr.dsq",
+            "seq106real.dsq",
+            "seq107expr.dsq",
+            "seq107real.dsq",
+            "seq108expr.dsq",
+            "seq109expr.dsq",
+            "seq109norm.dsq",
+            "seq109real.dsq",
+            "seq110expr.dsq",
+            "seq110lnkn.dsq",
+            "seq110lnkx.dsq",
+            "seq110norm.dsq",
+            "seq110real.dsq",
+            "seq111expr.dsq",
+            "seq111lnkn.dsq",
+            "seq111lnkx.dsq",
+            "seq111norm.dsq",
+            "seq111real.dsq",
+            "seq112expr.dsq",
+            "seq112lnkn.dsq",
+            "seq112lnkx.dsq",
+            "seq112real.dsq",
+            "seq113expr.dsq",
+            "seq113lnkn.dsq",
+            "seq113lnkx.dsq",
+            "seq113real.dsq",
+            "seq114expr.dsq",
+            "seq114lnkn.dsq",
+            "seq114lnkx.dsq",
+            "seq114real.dsq",
+            "seq115expr.dsq",
+            "seq115lnkn.dsq",
+            "seq115lnkx.dsq",
+            "seq115norm.dsq",
+            "seq115real.dsq",
+            "seq117easy.dsq",
+            "seq117expr.dsq",
+            "seq117norm.dsq",
+            "seq117prac.dsq",
+            "seq117real.dsq",
+            "seq118expr.dsq",
+            "seq118norm.dsq",
+            "seq118real.dsq",
+            "seq119easy.dsq",
+            "seq119norm.dsq",
+            "seq119prac.dsq",
+            "seq119real.dsq",
+            "seq121expr.dsq",
+            "seq121norm.dsq",
+            "seq122easy.dsq",
+            "seq122norm.dsq",
+            "seq122real.dsq",
+            "seq123easy.dsq",
+            "seq123expr.dsq",
+            "seq123norm.dsq",
+            "seq123prac.dsq",
+            "seq123real.dsq",
+            "seq126lnkn.dsq",
+            "seq126lnkx.dsq",
+            "seq127expr.dsq",
+            "seq127norm.dsq",
+            "seq128norm.dsq",
+            "seq128easy.dsq",
+            "seq117lnkn.dsq",
+            "seq117lnkx.dsq",
+            "seq123lnkn.dsq",
+            "seq123lnkx.dsq",
+            "seq118lnkn.dsq",
+            "seq118lnkx.dsq"
+        ]
 
-    for p1 in ["", "1p", "2p", "1p1", "1p2", "2p1", "2p2", "bas"]:
-        for p2 in ["", "bas", "pra", "nor", "exp", "ex1", "ex2", "ex3", "ex4"]:
-            filename = "seq%03d_%3s%3s" % (i, p1, p2)
+    elif base_filename == "g_seq.dat":
+        filename_table = [] # TODO
+
+    elif base_filename == "seqdata.dat":
+        filename_lookup = {}
+
+        for i in range(0, 1000):
+            filename = "seq%03d" % (i)
             filename_lookup[get_filename_hash(filename)] = filename
 
-filename_hashes = []
-with open("seqcode.dat", "rb") as infile:
-    data = bytearray(infile.read())
+            for p in ["", "prac", "easy", "norm", "real", "expr", "lnkn", "lnkx", "bnus"]:
+                filename = "seq%03d%s" % (i, p)
+                filename_lookup[get_filename_hash(filename)] = filename
 
-    for i in range(0, len(data), 4):
-        filename_hashes.append(int.from_bytes(data[i:i+4], 'little'))
+            for p1 in ["", "1p", "2p", "1p1", "1p2", "2p1", "2p2", "bas"]:
+                for p2 in ["", "bas", "pra", "nor", "exp", "ex1", "ex2", "ex3", "ex4"]:
+                    filename = "seq%03d_%3s%3s" % (i, p1, p2)
+                    filename_lookup[get_filename_hash(filename)] = filename
 
-        if filename_hashes[-1] in filename_lookup:
-            print("%08x: %s" % (filename_hashes[-1], filename_lookup[filename_hashes[-1]]))
-        else:
-            print("%08x" % filename_hashes[-1])
+        filename_table = []
+        with open("seqcode.dat", "rb") as infile:
+            data = bytearray(infile.read())
 
-output_path = "output"
+            for i in range(0, len(data), 4):
+                filename_hash = int.from_bytes(data[i:i+4], 'little')
 
-os.makedirs(output_path, exist_ok=True)
+                if filename_hash == 0xffffffff:
+                    break
 
-with open("seqdata.dat", "rb") as infile:
-    data = bytearray(infile.read())
+                filename_table.append(filename_lookup[filename_hash] + ".bin")
 
-    file_count = int.from_bytes(data[:4], 'little')
-    cur_offset = 0x10
+    output_path = args.output
 
-    for i in range(file_count):
-        offset = int.from_bytes(data[cur_offset:cur_offset+4], 'little')
-        cur_offset += 4
+    os.makedirs(output_path, exist_ok=True)
 
-        chunk = data[offset & 0x7fffffff:]
+    with open(args.input, "rb") as infile:
+        data = bytearray(infile.read())
 
-        is_enc = (offset & 0x80000000) != 0
+        file_count = int.from_bytes(data[:4], 'little')
+        cur_offset = 0x10
 
-        output_filename = "%s.bin" % (filename_lookup[filename_hashes[i]]) if filename_hashes[i] in filename_lookup else "output_%04d.bin" % i
-        output_filename = os.path.join(output_path, output_filename)
-        # print("%08x: %s" % (offset, output_filename))
+        for i in range(file_count):
+            offset = int.from_bytes(data[cur_offset:cur_offset+4], 'little')
+            cur_offset += 4
 
-        if is_enc:
-            decoder = DecodeGfdm(chunk)
-            chunk = decoder.decode()
-            chunk = decode_lz(chunk)
+            chunk = data[offset & 0x7fffffff:]
 
-        else:
-            chunk = decode_lz(chunk)
+            is_enc = (offset & 0x80000000) != 0
 
-        with open(output_filename, "wb") as outfile:
-            outfile.write(chunk)
+            output_filename = "%s" % (filename_table[i]) if filename_table else "output_%04d.bin" % i
+            output_filename = os.path.join(output_path, output_filename)
+
+            print("%08x: %s" % (offset & 0x7fffffff, output_filename))
+
+            if is_enc:
+                decoder = DecodeGfdm(chunk)
+                chunk = decoder.decode()
+                chunk = decode_lz(chunk)
+
+            else:
+                chunk = decode_lz(chunk)
+
+            with open(output_filename, "wb") as outfile:
+                outfile.write(chunk)
