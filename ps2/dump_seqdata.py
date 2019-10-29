@@ -853,7 +853,7 @@ if __name__ == "__main__":
 
             is_enc = (offset & 0x80000000) != 0
 
-            output_filename = "%s" % (filename_table[i]) if filename_table else "output_%04d.bin" % i
+            output_filename = "%s" % (filename_table[i]) if filename_table and i < len(filename_table) else "output_%04d.bin" % i
             output_filename = os.path.join(output_path, output_filename)
 
             print("%08x: %s" % (offset & 0x7fffffff, output_filename))
