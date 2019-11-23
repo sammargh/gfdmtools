@@ -1,6 +1,7 @@
 import argparse
 import glob
 import hashlib
+import itertools
 import os
 import struct
 
@@ -140,9 +141,11 @@ class PakDumper:
         entries = {}
 
         with open(filename, "rb") as infile:
+            infile.seek(0x08)
+            end_addr = int.from_bytes(infile.read(4), 'little')
             infile.seek(0x10)
 
-            while True:
+            while infile.tell() < end_addr:
                 md5sum = infile.read(0x10)
                 data = infile.read(0x10)
 
@@ -225,7 +228,12 @@ class PakDumper:
         filename_hash = self.calculate_filename_hash(input)
         filename_hash_crc16 = self.calculate_filename_hash_crc16(input)
         filename_hash_crc16_2 = self.calculate_filename_hash_crc16_cs(input)
-        return filename_hash in self.entries and self.entries[filename_hash]['key2'] in [filename_hash_crc16, filename_hash_crc16_2]
+        exists = filename_hash in self.entries and self.entries[filename_hash]['key2'] in [filename_hash_crc16, filename_hash_crc16_2]
+
+        if exists:
+            self.entries[filename_hash]['orig_filename'] = input
+
+        return exists
 
 
     def get_md5sum(self, data):
@@ -234,18 +242,19 @@ class PakDumper:
         return md5.digest()
 
 
-    def extract_data(self, path, input_path, output_path):
-        filename_hash = self.calculate_filename_hash(path)
+    def extract_data_mem(self, path, input_path="", filename_hash=None):
+        if filename_hash is None:
+            filename_hash = self.calculate_filename_hash(path)
 
         if filename_hash not in self.entries:
             print("Couldn't find entry for", path)
-            return False
+            return None
 
         entry = self.entries[filename_hash]
 
         if entry['packid'] > len(self.packlist):
             print("[BAD PACK_ID] pack_id: %d, data_offset: %08x, data_size: %08x, filename: %s" % (entry['packid'], entry['offset'], entry['filesize'], path))
-            return False
+            return None
 
         packpath = self.packlist[entry['packid']]
         if packpath.startswith('/'):
@@ -255,7 +264,7 @@ class PakDumper:
 
         if not os.path.exists(packpath):
             print("Could not find %s" % packpath)
-            return
+            return None
 
         data = bytearray(open(packpath, "rb").read()[entry['offset']:entry['offset']+entry['filesize']])
 
@@ -272,6 +281,12 @@ class PakDumper:
         if self.get_md5sum(data) != entry['md5sum']:
             print("Bad checksum for", path)
 
+        return decrypted
+
+
+    def extract_data(self, path, input_path, output_path):
+        data = self.extract_data_mem(path, input_path)
+
         if path.startswith('/'):
             path = path[1:]
 
@@ -280,7 +295,7 @@ class PakDumper:
         if not os.path.exists(os.path.dirname(output_path)):
             os.makedirs(os.path.dirname(output_path))
 
-        open(output_path, "wb").write(decrypted)
+        open(output_path, "wb").write(data)
 
         if self.demux and os.path.splitext(output_path)[1].lower() == ".pss":
             from pss_demux import demux_pss
@@ -292,85 +307,7 @@ class PakDumper:
 def bruteforce_filenames(dumper):
     filenames = []
 
-    templates = [
-        "/data/product/music/m%04d/d%04d.sq2",
-        "/data/product/music/m%04d/g%04d.sq2",
-
-        "/data/product/music/m%04d/d%04d.sq3",
-        "/data/product/music/m%04d/g%04d.sq3",
-
-        "/data/product/music/m%04d/d%04d.seq",
-        "/data/product/music/m%04d/g%04d.seq",
-
-        "/data/product/music/m%04d/spu%04dd.vas",
-        "/data/product/music/m%04d/spu%04dg.vas",
-        "/data/product/music/m%04d/spu%04dd.va2",
-        "/data/product/music/m%04d/spu%04dg.va2",
-        "/data/product/music/m%04d/spu%04dd.va3",
-        "/data/product/music/m%04d/spu%04dg.va3",
-
-        "/data/product/music/m%04d/fre%04d.bin",
-
-        "/data/product/music/m%04d/bgm%04d.mpg",
-        "/data/product/music/m%04d/bgm%04d.m2v",
-        "/data/product/music/m%04d/bgm%04d.pss",
-        "/data/product/music/m%04d/m%04d.mpg",
-        "/data/product/music/m%04d/m%04d.m2v",
-        "/data/product/music/m%04d/m%04d.pss",
-
-        "/data/product/music/m%04d/i%04ddm.bin",
-        "/data/product/music/m%04d/i%04dgf.bin",
-        "/data/product/music/m%04d/bgm%04d___k.bin",
-        "/data/product/music/m%04d/bgm%04d__bk.bin",
-        "/data/product/music/m%04d/bgm%04d_gbk.bin",
-        "/data/product/music/m%04d/bgm%04dd__k.bin",
-        "/data/product/music/m%04d/bgm%04dd_bk.bin",
-
-        "/data/product/music/m%04d/i%04ddm.at3",
-        "/data/product/music/m%04d/i%04dgf.at3",
-        "/data/product/music/m%04d/bgm%04d___k.at3",
-        "/data/product/music/m%04d/bgm%04d__bk.at3",
-        "/data/product/music/m%04d/bgm%04d_gbk.at3",
-        "/data/product/music/m%04d/bgm%04dd__k.at3",
-        "/data/product/music/m%04d/bgm%04dd_bk.at3",
-        "/data/product/music/m%04d/b%04d___k.at3",
-        "/data/product/music/m%04d/b%04d__bk.at3",
-        "/data/product/music/m%04d/b%04d_gbk.at3",
-        "/data/product/music/m%04d/b%04dd__k.at3",
-        "/data/product/music/m%04d/b%04dd_bk.at3",
-
-        "/data/product/movie/music/mv%04d.m2v",
-    ]
-
-    for i in range(0, 3000):
-        for template in templates:
-            path = template % tuple(i for _ in range(template.count("%04d")))
-
-            if dumper.file_exists(path):
-                filenames.append(path)
-
-        for j in range(0, 10):
-            for path in ["/data/product/music/m%04d/dm_lesson%01d.va2" % (i, j), "/data/product/music/m%04d/gt_lesson%01d.va2" % (i, j)]:
-                if dumper.file_exists(path):
-                    filenames.append(path)
-
-    for i in range(0, 100):
-        for j in range(0, 100):
-            for ext in ['va2', 'va3']:
-                path = "/data/product/music/system/gfv%d_v%02d.%s" % (i, j, ext)
-
-                if dumper.file_exists(path):
-                    filenames.append(path)
-
-        for ext in ['va2', 'va3']:
-            path = "/data/product/music/system/gfv%d_se.%s" % (i, ext)
-            if dumper.file_exists(path):
-                filenames.append(path)
-
-            path = "/data/product/music/system/gfv_v%02d.%s" % (i, ext)
-            if dumper.file_exists(path):
-                filenames.append(path)
-
+    # TODO: Remove duplicates
     possible_filenames = [
         "/data/product/music/system/gfv_se.va2",
         "/data/product/music/system/gfv_se.va3",
@@ -426,11 +363,748 @@ def bruteforce_filenames(dumper):
         "/data/product/font/font16x16x8/3_2.img",
         "/data/product/font/font16x16x8/3_3.img",
         "/data/product/font/DFHSG7.TTC",
+        "/data/product/d3/model/tex_gf_arc_info.bin",
+        "/data/product/d3/model/tex_gf_card.bin",
+        "/data/product/d3/model/tex_gf_caution.bin",
+        "/data/product/d3/model/tex_gf_clear.bin",
+        "/data/product/d3/model/tex_gf_common.bin",
+        "/data/product/d3/model/tex_gf_ending.bin",
+        "/data/product/d3/model/tex_gf_entry.bin",
+        "/data/product/d3/model/tex_gf_entry1.bin",
+        "/data/product/d3/model/tex_gf_free_info.bin",
+        "/data/product/d3/model/tex_gf_game.bin",
+        "/data/product/d3/model/tex_gf_game2.bin",
+        "/data/product/d3/model/tex_gf_game2_2.bin",
+        "/data/product/d3/model/tex_gf_game3.bin",
+        "/data/product/d3/model/tex_gf_game3_2.bin",
+        "/data/product/d3/model/tex_gf_game_2.bin",
+        "/data/product/d3/model/tex_gf_hitchart.bin",
+        "/data/product/d3/model/tex_gf_information.bin",
+        "/data/product/d3/model/tex_gf_keyconfig.bin",
+        "/data/product/d3/model/tex_gf_konamiid.bin",
+        "/data/product/d3/model/tex_gf_loading.bin",
+        "/data/product/d3/model/tex_gf_mcard.bin",
+        "/data/product/d3/model/tex_gf_playstyle.bin",
+        "/data/product/d3/model/tex_gf_puzzle.bin",
+        "/data/product/d3/model/tex_gf_rec_info.bin",
+        "/data/product/d3/model/tex_gf_result.bin",
+        "/data/product/d3/model/tex_gf_result_total.bin",
+        "/data/product/d3/model/tex_gf_resultss.bin",
+        "/data/product/d3/model/tex_gf_roulette.bin",
+        "/data/product/d3/model/tex_gf_save_load.bin",
+        "/data/product/d3/model/tex_gf_scoreranking.bin",
+        "/data/product/d3/model/tex_gf_select_mode.bin",
+        "/data/product/d3/model/tex_gf_select_music.bin",
+        "/data/product/d3/model/tex_gf_session.bin",
+        "/data/product/d3/model/tex_gf_session2.bin",
+        "/data/product/d3/model/tex_gf_session3.bin",
+        "/data/product/d3/model/tex_gf_sessiona.bin",
+        "/data/product/d3/model/tex_gf_sessiona2.bin",
+        "/data/product/d3/model/tex_gf_sessiona3.bin",
+        "/data/product/d3/model/tex_gf_sessionb.bin",
+        "/data/product/d3/model/tex_gf_sessionb2.bin",
+        "/data/product/d3/model/tex_gf_sessionb3.bin",
+        "/data/product/d3/model/tex_gf_sessionc.bin",
+        "/data/product/d3/model/tex_gf_sessionc2.bin",
+        "/data/product/d3/model/tex_gf_sessionc3.bin",
+        "/data/product/d3/model/tex_gf_shopranking.bin",
+        "/data/product/d3/model/tex_gf_slot.bin",
+        "/data/product/d3/model/tex_gf_title.bin",
+        "/data/product/d3/model/tex_gf_tower.bin",
+        "/data/product/d3/model/tex_gf_warning.bin",
+        "/data/product/d3/model/tex_dm_arcinfo.bin",
+        "/data/product/d3/model/tex_dm_freeinfo.bin",
+        "/data/product/d3/model/tex_dm_game.bin",
+        "/data/product/d3/model/tex_dm_game2.bin",
+        "/data/product/d3/model/tex_dm_game3.bin",
+        "/data/product/d3/model/tex_dm_keyconfig.bin",
+        "/data/product/d3/model/tex_dm_recinfo.bin",
+        "/data/product/d3/model/tex_gfdm_training.bin",
+        "/data/product/d3/model/tex_usbdm_keyconfig.bin",
+        "/data/product/aep/battle.bin",
+        "/data/product/aep/dm_game.bin",
+        "/data/product/aep/dm_game00.bin",
+        "/data/product/aep/dm_select_mode.bin",
+        "/data/product/aep/gf_aep_list.bin",
+        "/data/product/aep/gf_battle.bin",
+        "/data/product/aep/gf_battle_common.bin",
+        "/data/product/aep/gf_battle_matching.bin",
+        "/data/product/aep/gf_battle_result.bin",
+        "/data/product/aep/gf_caution.bin",
+        "/data/product/aep/gf_common.bin",
+        "/data/product/aep/gf_custom.bin",
+        "/data/product/aep/gf_eamuse.bin",
+        "/data/product/aep/gf_ending.bin",
+        "/data/product/aep/gf_game.bin",
+        "/data/product/aep/gf_game00.bin",
+        "/data/product/aep/gf_game_up.bin",
+        "/data/product/aep/gf_hitchart.bin",
+        "/data/product/aep/gf_how.bin",
+        "/data/product/aep/gf_howdm.bin",
+        "/data/product/aep/gf_howgf.bin",
+        "/data/product/aep/gf_information.bin",
+        "/data/product/aep/gf_jukebox.bin",
+        "/data/product/aep/gf_name.bin",
+        "/data/product/aep/gf_pass.bin",
+        "/data/product/aep/gf_playdata.bin",
+        "/data/product/aep/gf_result.bin",
+        "/data/product/aep/gf_select_mode.bin",
+        "/data/product/aep/gf_select_music.bin",
+        "/data/product/aep/gf_title.bin",
+        "/data/product/aep/gf_warning.bin",
+        "/data/product/d3/model/dm_chip.bin",
+        "/data/product/d3/model/mdl_dm_game.bin",
+        "/data/product/d3/model/mdl_gf_ability.bin",
+        "/data/product/d3/model/mdl_gf_ascii.bin",
+        "/data/product/d3/model/mdl_gf_battle.bin",
+        "/data/product/d3/model/mdl_gf_battle_common.bin",
+        "/data/product/d3/model/mdl_gf_battle_matching.bin",
+        "/data/product/d3/model/mdl_gf_battle_result.bin",
+        "/data/product/d3/model/mdl_gf_caution.bin",
+        "/data/product/d3/model/mdl_gf_chara.bin",
+        "/data/product/d3/model/mdl_gf_common.bin",
+        "/data/product/d3/model/mdl_gf_custom.bin",
+        "/data/product/d3/model/mdl_gf_eamuse.bin",
+        "/data/product/d3/model/mdl_gf_ending.bin",
+        "/data/product/d3/model/mdl_gf_game.bin",
+        "/data/product/d3/model/mdl_gf_hitchart.bin",
+        "/data/product/d3/model/mdl_gf_how.bin",
+        "/data/product/d3/model/mdl_gf_howdm.bin",
+        "/data/product/d3/model/mdl_gf_howgf.bin",
+        "/data/product/d3/model/mdl_gf_information.bin",
+        "/data/product/d3/model/mdl_gf_jukebox.bin",
+        "/data/product/d3/model/mdl_gf_name.bin",
+        "/data/product/d3/model/mdl_gf_number.bin",
+        "/data/product/d3/model/mdl_gf_pass.bin",
+        "/data/product/d3/model/mdl_gf_playdata.bin",
+        "/data/product/d3/model/mdl_gf_result.bin",
+        "/data/product/d3/model/mdl_gf_select_mode.bin",
+        "/data/product/d3/model/mdl_gf_select_music.bin",
+        "/data/product/d3/model/mdl_gf_skill_meter.bin",
+        "/data/product/d3/model/mdl_gf_taikai.bin",
+        "/data/product/d3/model/mdl_gf_title.bin",
+        "/data/product/d3/model/mdl_gf_warning.bin",
+        "/data/product/d3/model/mdl_testmode.bin",
+        "/data/product/d3/model/tex_dm_game.bin",
+        "/data/product/d3/model/tex_gf_ability.bin",
+        "/data/product/d3/model/tex_gf_ascii.bin",
+        "/data/product/d3/model/tex_gf_battle.bin",
+        "/data/product/d3/model/tex_gf_battle_common.bin",
+        "/data/product/d3/model/tex_gf_battle_matching.bin",
+        "/data/product/d3/model/tex_gf_battle_result.bin",
+        "/data/product/d3/model/tex_gf_caution.bin",
+        "/data/product/d3/model/tex_gf_chara.bin",
+        "/data/product/d3/model/tex_gf_common.bin",
+        "/data/product/d3/model/tex_gf_custom.bin",
+        "/data/product/d3/model/tex_gf_eamuse.bin",
+        "/data/product/d3/model/tex_gf_ending.bin",
+        "/data/product/d3/model/tex_gf_game.bin",
+        "/data/product/d3/model/tex_gf_hitchart.bin",
+        "/data/product/d3/model/tex_gf_how.bin",
+        "/data/product/d3/model/tex_gf_howdm.bin",
+        "/data/product/d3/model/tex_gf_howgf.bin",
+        "/data/product/d3/model/tex_gf_information.bin",
+        "/data/product/d3/model/tex_gf_jukebox.bin",
+        "/data/product/d3/model/tex_gf_name.bin",
+        "/data/product/d3/model/tex_gf_number.bin",
+        "/data/product/d3/model/tex_gf_pass.bin",
+        "/data/product/d3/model/tex_gf_playdata.bin",
+        "/data/product/d3/model/tex_gf_result.bin",
+        "/data/product/d3/model/tex_gf_select_mode.bin",
+        "/data/product/d3/model/tex_gf_select_music.bin",
+        "/data/product/d3/model/tex_gf_skill_meter.bin",
+        "/data/product/d3/model/tex_gf_taikai.bin",
+        "/data/product/d3/model/tex_gf_title.bin",
+        "/data/product/d3/model/tex_gf_warning.bin",
+        "/data/product/d3/model/tex_testmode.bin",
+        "/data/product/d3/package/debug.bin",
+        "/data/product/d3/package/igai.bin",
+        "/data/product/d3/package/ikeuchi.bin",
+        "/data/product/d3/package/kobayashi.bin",
+        "/data/product/d3/package/kono.bin",
+        "/data/product/d3/package/mito.bin",
+        "/data/product/d3/package/mochi.bin",
+        "/data/product/d3/package/nayuta.bin",
+        "/data/product/d3/package/packlist.bin",
+        "/data/product/d3/package/sakai.bin",
+        "/data/product/d3/package/takahashi.bin",
+        "/data/product/d3/package/takehiro.bin",
+        "/data/product/d3/package/usr02225.bin",
+        "/data/product/d3/package/usr02798.bin",
+        "/data/product/d3/package/usr04396.bin",
+        "/data/product/d3/package/usr04682.bin",
+        "/data/product/d3/package/usr04686.bin",
+        "/data/product/d3/package/usr07026.bin",
+        "/data/product/d3/package/usr10015403.bin",
+        "/data/product/d3/package/usr10016395.bin",
+        "/data/product/d3/package/usr10019619.bin",
+        "/data/product/d3/package/usr10023386.bin",
+        "/data/product/d3/package/usr10030684.bin",
+        "/data/product/d3/package/usr10033101.bin",
+        "/data/product/d3/package/usr14381.bin",
+        "/data/product/d3/package/usr14388.bin",
+        "/data/product/font/font16x16x8/0_0.img",
+        "/data/product/font/font16x16x8/0_1.img",
+        "/data/product/font/font16x16x8/1_0.img",
+        "/data/product/font/font16x16x8/1_1.img",
+        "/data/product/font/font16x16x8/1_2.img",
+        "/data/product/font/font16x16x8/1_3.img",
+        "/data/product/font/font16x16x8/2_0.img",
+        "/data/product/font/font16x16x8/2_1.img",
+        "/data/product/font/font16x16x8/2_2.img",
+        "/data/product/font/font16x16x8/2_3.img",
+        "/data/product/font/font16x16x8/3_0.img",
+        "/data/product/font/font16x16x8/3_1.img",
+        "/data/product/font/font16x16x8/3_2.img",
+        "/data/product/font/font16x16x8/3_3.img",
+        "/data/product/music/mdbe_xg.bin",
+        "/data/product/movie/system/entry00.m2v",
+        "/data/product/movie/system/title00.m2v",
+        "/data/product/d3/model/dm_chip.bin",
+        "/data/product/font/DFHSG7.TTC",
+        "/data/product/music/system/gfxg_se.va3",
+        "/data/product/music/system/dmxg_dflt.va3",
+        "/data/product/music/system/gfxg_se.va3",
+        "/data/product/music/system/dmxg_se.va3",
+        "/data/product/music/system/gfv8_se.va3",
+        "/data/product/music/system/dmv8_dflt.va3",
+        "/data/product/music/system/gfv8_se.va3",
+        "/data/product/music/system/dmv8_se.va3",
+        "/data/product/aep/battle.bin",
+        "/data/product/aep/cm_group.bin",
+        "/data/product/aep/cm_group_entry.bin",
+        "/data/product/aep/cm_paseli.bin",
+        "/data/product/aep/cm_transition.bin",
+        "/data/product/aep/cm_vtleff_bg.bin",
+        "/data/product/aep/cm_vtleff_fg.bin",
+        "/data/product/aep/cm_vtleff_mg.bin",
+        "/data/product/aep/co_paseli.bin",
+        "/data/product/aep/co_vtleff_bg.bin",
+        "/data/product/aep/dm_game.bin",
+        "/data/product/aep/dm_select_mode.bin",
+        "/data/product/aep/gd_gam_gauge.bin",
+        "/data/product/aep/gd_gam_lp.bin",
+        "/data/product/aep/gd_group.bin",
+        "/data/product/aep/gf_aep_list.bin",
+        "/data/product/aep/gf_battle.bin",
+        "/data/product/aep/gf_battle_common.bin",
+        "/data/product/aep/gf_battle_matching.bin",
+        "/data/product/aep/gf_battle_result.bin",
+        "/data/product/aep/gf_caution.bin",
+        "/data/product/aep/gf_common.bin",
+        "/data/product/aep/gf_custom.bin",
+        "/data/product/aep/gf_eamuse.bin",
+        "/data/product/aep/gf_ending.bin",
+        "/data/product/aep/gf_game.bin",
+        "/data/product/aep/gf_game_up.bin",
+        "/data/product/aep/gf_hitchart.bin",
+        "/data/product/aep/gf_howdm.bin",
+        "/data/product/aep/gf_howgf.bin",
+        "/data/product/aep/gf_information.bin",
+        "/data/product/aep/gf_name.bin",
+        "/data/product/aep/gf_pass.bin",
+        "/data/product/aep/gf_playdata.bin",
+        "/data/product/aep/gf_result.bin",
+        "/data/product/aep/gf_select_mode.bin",
+        "/data/product/aep/gf_select_music.bin",
+        "/data/product/aep/gf_title.bin",
+        "/data/product/aep/gf_warning.bin",
+        "/data/product/aep/sp_shop_cmpship.bin",
+        "/data/product/aep/sp_shop_cmpship_rank.bin",
+        "/data/product/aep/sp_shop_entry.bin",
+        "/data/product/aep/sp_shop_taikai.bin",
+        "/data/product/aep/sp_shop_taikai_rank.bin",
+        "/data/product/d3/model/mdl_attack_effect.bin",
+        "/data/product/d3/model/mdl_cm_customicon.bin",
+        "/data/product/d3/model/mdl_cm_custom_icon.bin",
+        "/data/product/d3/model/mdl_cm_event_logo.bin",
+        "/data/product/d3/model/mdl_cm_group.bin",
+        "/data/product/d3/model/mdl_cm_groupicon.bin",
+        "/data/product/d3/model/mdl_cm_group_common.bin",
+        "/data/product/d3/model/mdl_cm_group_entry.bin",
+        "/data/product/d3/model/mdl_cm_group_icon.bin",
+        "/data/product/d3/model/mdl_cm_group_match.bin",
+        "/data/product/d3/model/mdl_cm_item_icon.bin",
+        "/data/product/d3/model/mdl_cm_paseli.bin",
+        "/data/product/d3/model/mdl_cm_transition.bin",
+        "/data/product/d3/model/mdl_cm_vtleff_bg.bin",
+        "/data/product/d3/model/mdl_cm_vtleff_fg.bin",
+        "/data/product/d3/model/mdl_cm_vtleff_mg.bin",
+        "/data/product/d3/model/mdl_com_transition.bin",
+        "/data/product/d3/model/mdl_dm_game.bin",
+        "/data/product/d3/model/mdl_gd_gam_lp.bin",
+        "/data/product/d3/model/mdl_gfdm_transition.bin",
+        "/data/product/d3/model/mdl_gf_ability.bin",
+        "/data/product/d3/model/mdl_gf_ascii.bin",
+        "/data/product/d3/model/mdl_gf_battle.bin",
+        "/data/product/d3/model/mdl_gf_battle_common.bin",
+        "/data/product/d3/model/mdl_gf_battle_matching.bin",
+        "/data/product/d3/model/mdl_gf_battle_result.bin",
+        "/data/product/d3/model/mdl_gf_caution.bin",
+        "/data/product/d3/model/mdl_gf_chara.bin",
+        "/data/product/d3/model/mdl_gf_common.bin",
+        "/data/product/d3/model/mdl_gf_custom.bin",
+        "/data/product/d3/model/mdl_gf_eamuse.bin",
+        "/data/product/d3/model/mdl_gf_ending.bin",
+        "/data/product/d3/model/mdl_gf_game.bin",
+        "/data/product/d3/model/mdl_gf_hitchart.bin",
+        "/data/product/d3/model/mdl_gf_how.bin",
+        "/data/product/d3/model/mdl_gf_howdm.bin",
+        "/data/product/d3/model/mdl_gf_howgf.bin",
+        "/data/product/d3/model/mdl_gf_information.bin",
+        "/data/product/d3/model/mdl_gf_name.bin",
+        "/data/product/d3/model/mdl_gf_number.bin",
+        "/data/product/d3/model/mdl_gf_pass.bin",
+        "/data/product/d3/model/mdl_gf_playdata.bin",
+        "/data/product/d3/model/mdl_gf_result.bin",
+        "/data/product/d3/model/mdl_gf_select_mode.bin",
+        "/data/product/d3/model/mdl_gf_select_music.bin",
+        "/data/product/d3/model/mdl_gf_skill_meter.bin",
+        "/data/product/d3/model/mdl_gf_taikai.bin",
+        "/data/product/d3/model/mdl_gf_title.bin",
+        "/data/product/d3/model/mdl_gf_warning.bin",
+        "/data/product/d3/model/mdl_sp_shop_cmpship.bin",
+        "/data/product/d3/model/mdl_sp_shop_cmpship_rank.bin",
+        "/data/product/d3/model/mdl_sp_shop_entry.bin",
+        "/data/product/d3/model/mdl_sp_shop_taikai.bin",
+        "/data/product/d3/model/mdl_sp_shop_taikai_rank.bin",
+        "/data/product/d3/model/mdl_testmode.bin",
+        "/data/product/d3/model/mdl_test_group.bin",
+        "/data/product/d3/model/tex_attack_effect.bin",
+        "/data/product/d3/model/tex_cm_customicon.bin",
+        "/data/product/d3/model/tex_cm_custom_icon.bin",
+        "/data/product/d3/model/tex_cm_event_logo.bin",
+        "/data/product/d3/model/tex_cm_group.bin",
+        "/data/product/d3/model/tex_cm_groupicon.bin",
+        "/data/product/d3/model/tex_cm_group_common.bin",
+        "/data/product/d3/model/tex_cm_group_entry.bin",
+        "/data/product/d3/model/tex_cm_group_icon.bin",
+        "/data/product/d3/model/tex_cm_group_match.bin",
+        "/data/product/d3/model/tex_cm_item_icon.bin",
+        "/data/product/d3/model/tex_cm_paseli.bin",
+        "/data/product/d3/model/tex_cm_transition.bin",
+        "/data/product/d3/model/tex_cm_vtleff_bg.bin",
+        "/data/product/d3/model/tex_cm_vtleff_fg.bin",
+        "/data/product/d3/model/tex_cm_vtleff_mg.bin",
+        "/data/product/d3/model/tex_com_transition.bin",
+        "/data/product/d3/model/tex_dm_game.bin",
+        "/data/product/d3/model/tex_gd_gam_lp.bin",
+        "/data/product/d3/model/tex_gfdm_transition.bin",
+        "/data/product/d3/model/tex_gf_ability.bin",
+        "/data/product/d3/model/tex_gf_ascii.bin",
+        "/data/product/d3/model/tex_gf_battle.bin",
+        "/data/product/d3/model/tex_gf_battle_common.bin",
+        "/data/product/d3/model/tex_gf_battle_matching.bin",
+        "/data/product/d3/model/tex_gf_battle_result.bin",
+        "/data/product/d3/model/tex_gf_caution.bin",
+        "/data/product/d3/model/tex_gf_chara.bin",
+        "/data/product/d3/model/tex_gf_common.bin",
+        "/data/product/d3/model/tex_gf_custom.bin",
+        "/data/product/d3/model/tex_gf_eamuse.bin",
+        "/data/product/d3/model/tex_gf_ending.bin",
+        "/data/product/d3/model/tex_gf_game.bin",
+        "/data/product/d3/model/tex_gf_hitchart.bin",
+        "/data/product/d3/model/tex_gf_how.bin",
+        "/data/product/d3/model/tex_gf_howdm.bin",
+        "/data/product/d3/model/tex_gf_howgf.bin",
+        "/data/product/d3/model/tex_gf_information.bin",
+        "/data/product/d3/model/tex_gf_name.bin",
+        "/data/product/d3/model/tex_gf_number.bin",
+        "/data/product/d3/model/tex_gf_pass.bin",
+        "/data/product/d3/model/tex_gf_playdata.bin",
+        "/data/product/d3/model/tex_gf_result.bin",
+        "/data/product/d3/model/tex_gf_select_mode.bin",
+        "/data/product/d3/model/tex_gf_select_music.bin",
+        "/data/product/d3/model/tex_gf_skill_meter.bin",
+        "/data/product/d3/model/tex_gf_taikai.bin",
+        "/data/product/d3/model/tex_gf_title.bin",
+        "/data/product/d3/model/tex_gf_warning.bin",
+        "/data/product/d3/model/tex_sp_shop_cmpship.bin",
+        "/data/product/d3/model/tex_sp_shop_cmpship_rank.bin",
+        "/data/product/d3/model/tex_sp_shop_entry.bin",
+        "/data/product/d3/model/tex_sp_shop_taikai.bin",
+        "/data/product/d3/model/tex_sp_shop_taikai_rank.bin",
+        "/data/product/d3/model/tex_testmode.bin",
+        "/data/product/d3/model/tex_test_group.bin",
+
+        "/data/product/d3/model/mdl_gf_index_shougou.bin",
+        "/data/product/d3/model/tex_gf_index_shougou.bin",
+        "/data/product/d3/model/mdl_gf_icon.bin",
+        "/data/product/d3/model/tex_gf_icon.bin",
+        "/data/product/d3/model/mdl_gf_chara.bin",
+        "/data/product/d3/model/tex_gf_chara.bin",
+        "/data/product/d3/model/mdl_gf_ascii.bin",
+        "/data/product/d3/model/tex_gf_ascii.bin",
+        "/data/product/d3/model/mdl_gf_idi.bin",
+        "/data/product/d3/model/tex_gf_idi.bin",
+        "/data/product/d3/model/mdl_gf_quest.bin",
+        "/data/product/d3/model/tex_gf_quest.bin",
+        "/data/product/d3/model/mdl_gf_quest_common.bin",
+        "/data/product/d3/model/tex_gf_quest_common.bin",
+        "/data/product/d3/model/mdl_gf_select_item.bin",
+        "/data/product/d3/model/tex_gf_select_item.bin",
+        "/data/product/d3/model/mdl_gf_select_grandprix.bin",
+        "/data/product/d3/model/tex_gf_select_grandprix.bin",
+        "/data/product/d3/model/mdl_gf_result_grandprix.bin",
+        "/data/product/d3/model/tex_gf_result_grandprix.bin",
+        "/data/product/d3/model/mdl_gf_bg.bin",
+        "/data/product/d3/model/tex_gf_bg.bin",
+
+        "/data/product/aep/gf_index_shougou.bin",
+        "/data/product/aep/gf_icon.bin",
+        "/data/product/aep/gf_chara.bin",
+        "/data/product/aep/gf_ascii.bin",
+        "/data/product/aep/gf_idi.bin",
+        "/data/product/aep/gf_quest.bin",
+        "/data/product/aep/gf_quest_common.bin",
+        "/data/product/aep/gf_select_item.bin",
+        "/data/product/aep/gf_select_grandprix.bin",
+        "/data/product/aep/gf_result_grandprix.bin",
+        "/data/product/aep/gf_bg.bin",
+
+        "/data/product/aep/gf_debug.bin",
+        "/data/product/d3/model/mdl_gf_debug.bin",
+        "/data/product/d3/model/tex_gf_debug.bin",
+
+        "/data/product/music/test/system.va3",
+        "/data/product/music/test/se.va3",
+        "/data/product/music/test/haruhi.bgm",
+
+        "/data/product/aep/gf_battle_event.bin",
+        "/data/product/d3/model/mdl_gf_battle_event.bin",
+        "/data/product/d3/model/tex_gf_battle_event.bin",
     ]
+
+    system_audio_parts = [
+        "volume",
+        "phase",
+        "scale",
+        "V6CM03",
+        "V6CM02",
+        "V6CM01",
+        "p_custom",
+        "q_result",
+        "q_select",
+        "battle_result",
+        "battle02",
+        "battle01",
+        "result_total",
+        "volume_check",
+        "phase_check",
+        "scale_check",
+        "jukebox",
+        "information",
+        "b_result",
+        "battle",
+        "b_info",
+        "playdata",
+        "session",
+        "select",
+        "result",
+        "ranking",
+        "clear",
+        "konami",
+        "title",
+        "entry",
+        "xg_logo",
+        "xg2_thankyou",
+        "xg2_result",
+        "xg2_entry",
+        "v8_logo",
+        "v8_thankyou",
+        "v8_result",
+        "v8_entry",
+    ]
+
+    for system_audio_part in system_audio_parts:
+        for ext in ['bin', 'va2', 'va3', 'pss']:
+            for game in ['_gf', '_dm', '']:
+                path = "/data/product/music/system/%s%s.%s" % (system_audio_part, game, ext)
+                possible_filenames.append(path)
 
     for path in possible_filenames:
         if dumper.file_exists(path):
             filenames.append(path)
+
+    filenames = list(set(filenames))
+
+    if "/data/product/d3/package/packlist.bin" in filenames:
+        data = dumper.extract_data_mem("/data/product/d3/package/packlist.bin")
+
+        if data[:4] == b"TSLF":
+            offset = int.from_bytes(data[0x14:0x18], 'little')
+            first_offset = int.from_bytes(data[offset:offset+4], 'little')
+
+        else:
+            offset = int.from_bytes(data[0x1c:0x20], 'little')
+            first_offset = int.from_bytes(data[offset:offset+4], 'little')
+
+        offsets = [x for x in [int.from_bytes(data[offset+idx:offset+idx+4], 'little') for idx in range(0, first_offset - offset, 4)] if x != 0]
+
+        for offset in offsets:
+            string = data[offset:offset+data[offset:].index(b'\0')].decode('ascii').strip('\0')
+            path = "/data/product/d3/package/%s" % (string)
+
+            if dumper.file_exists(path):
+                filenames.append(path)
+
+    if "/data/product/aep/gf_aep_list.bin" in filenames:
+        data = dumper.extract_data_mem("/data/product/aep/gf_aep_list.bin")
+
+        for offset in range(0, len(data), 0x20):
+            string = data[offset:offset+data[offset:].index(b'\0')].decode('ascii').strip('\0')
+            path = "/data/product/aep/%s.bin" % (string)
+
+            if dumper.file_exists(path):
+                filenames.append(path)
+
+            path = "/data/product/d3/model/mdl_%s.bin" % (string)
+
+            if dumper.file_exists(path):
+                filenames.append(path)
+
+            path = "/data/product/d3/model/tex_%s.bin" % (string)
+
+            if dumper.file_exists(path):
+                filenames.append(path)
+
+
+    templates = [
+        "/data/product/music/m%04d/event%04d.evt",
+
+        "/data/product/music/m%04d/d%04d.sq2",
+        "/data/product/music/m%04d/g%04d.sq2",
+
+        "/data/product/music/m%04d/d%04d.sq3",
+        "/data/product/music/m%04d/g%04d.sq3",
+
+        "/data/product/music/m%04d/d%04d.seq",
+        "/data/product/music/m%04d/g%04d.seq",
+
+        "/data/product/music/m%04d/spu%04dd.vas",
+        "/data/product/music/m%04d/spu%04dg.vas",
+        "/data/product/music/m%04d/spu%04dd.va2",
+        "/data/product/music/m%04d/spu%04dg.va2",
+        "/data/product/music/m%04d/spu%04dd.va3",
+        "/data/product/music/m%04d/spu%04dg.va3",
+        "/data/product/music/m%04d/spu%04dd.pss",
+        "/data/product/music/m%04d/spu%04dg.pss",
+
+        "/data/product/music/m%04d/fre%04d.bin",
+
+        "/data/product/music/m%04d/bgm%04d.mpg",
+        "/data/product/music/m%04d/bgm%04d.m2v",
+        "/data/product/music/m%04d/bgm%04d.pss",
+        "/data/product/music/m%04d/m%04d.mpg",
+        "/data/product/music/m%04d/m%04d.m2v",
+        "/data/product/music/m%04d/m%04d.pss",
+
+        "/data/product/music/m%04d/i%04ddm.bin",
+        "/data/product/music/m%04d/i%04dgf.bin",
+        "/data/product/music/m%04d/i%04ddm.at3",
+        "/data/product/music/m%04d/i%04dgf.at3",
+        "/data/product/music/m%04d/i%04ddm.pss",
+        "/data/product/music/m%04d/i%04dgf.pss",
+
+        "/data/product/movie/music/mv%04d.m2v",
+        "/data/product/movie/thema/tm%04ds.m2v",
+        "/data/product/movie/thema/tm%04d.m2v",
+        "/data/product/movie/music/mv%04d.pss",
+        "/data/product/movie/thema/tm%04ds.pss",
+        "/data/product/movie/thema/tm%04d.pss",
+        "/data/product/movie/music/mv%04d.mpg",
+        "/data/product/movie/thema/tm%04ds.mpg",
+        "/data/product/movie/thema/tm%04d.mpg",
+    ]
+
+    valid_t = [t for t in ["".join(i) for i in itertools.product('_gdbk', repeat = 4)] if t[0] in ['_', 'd'] and t[1] in ['_', 'g'] and t[2] in ['_', 'b'] and t[3] in ['_', 'k']]
+    for t in sorted(valid_t):
+        for ext in ['bin', 'at3']:
+            templates.append("/data/product/music/m%04d/bgm%04d" + t + "_xg." + ext)
+            templates.append("/data/product/music/m%04d/b%04d" + t + "_xg." + ext)
+            templates.append("/data/product/music/m%04d/bgm%04d" + t + "." + ext)
+            templates.append("/data/product/music/m%04d/b%04d" + t + "." + ext)
+
+    for i in range(0, 9999):
+        for template in templates:
+            path = template % tuple(i for _ in range(template.count("%04d")))
+
+            if dumper.file_exists(path):
+                filenames.append(path)
+
+        for j in range(0, 10):
+            for path in ["/data/product/music/m%04d/dm_lesson%01d.va2" % (i, j), "/data/product/music/m%04d/gt_lesson%01d.va2" % (i, j)]:
+                if dumper.file_exists(path):
+                    filenames.append(path)
+
+    templates = [
+        "/data/product/aep/gf_int_%03d.bin",
+        "/data/product/d3/model/mdl_gf_int_%03d.bin",
+        "/data/product/d3/model/tex_gf_int_%03d.bin",
+        "/data/product/d3/package/pack%03d.bin",
+        "/data/product/aep/gf_int_%03d.bin",
+    ]
+
+    for i in range(0, 1000):
+        for template in templates:
+            path = template % tuple(i for _ in range(template.count("%03d")))
+
+            if dumper.file_exists(path):
+                filenames.append(path)
+
+    templates = [
+        "/data/product/d3/model/mdl_gf_idx_image_%02d.bin",
+        "/data/product/d3/model/mdl_gf_idx_image%02d.bin",
+        "/data/product/d3/model/mdl_gf_index_name%02d.bin",
+        "/data/product/d3/model/mdl_gf_jac_image_%02d.bin",
+        "/data/product/d3/model/mdl_gf_game%02d.bin",
+        "/data/product/d3/model/mdl_dm_game%02d.bin",
+
+        "/data/product/d3/model/tex_gf_idx_image_%02d.bin",
+        "/data/product/d3/model/tex_gf_idx_image%02d.bin",
+        "/data/product/d3/model/tex_gf_index_name%02d.bin",
+        "/data/product/d3/model/tex_gf_jac_image_%02d.bin",
+        "/data/product/d3/model/tex_gf_game%02d.bin",
+        "/data/product/d3/model/tex_dm_game%02d.bin",
+
+        "/data/product/music/system/system%02d.m2v",
+        "/data/product/movie/system/title%02d.m2v",
+        "/data/product/movie/system/select_music%02d.m2v",
+        "/data/product/movie/system/logo_xg%02d.m2v",
+        "/data/product/movie/system/select_mode%02d.m2v",
+        "/data/product/movie/system/select_music_enc%02d.m2v",
+        "/data/product/movie/system/ending%02d.m2v",
+        "/data/product/movie/system/jukebox%02d.m2v",
+        "/data/product/movie/system/records%02d.m2v",
+        "/data/product/movie/system/result%02d.m2v",
+        "/data/product/movie/system/select_mode%02d.m2v",
+        "/data/product/movie/system/entry%02d.m2v",
+
+        "/data/product/d3/model/mdl_cm_common%02d.bin",
+        "/data/product/d3/model/mdl_sp_game_skin%02d.bin",
+        "/data/product/d3/model/mdl_sp_gf_atkf%02d.bin",
+        "/data/product/d3/model/mdl_sp_ggm_ef%02d.bin",
+
+        "/data/product/d3/model/tex_cm_common%02d.bin",
+        "/data/product/d3/model/tex_sp_game_skin%02d.bin",
+        "/data/product/d3/model/tex_sp_gf_atkf%02d.bin",
+        "/data/product/d3/model/tex_sp_ggm_ef%02d.bin",
+
+        "/data/product/aep/cm_common%02d.bin",
+        "/data/product/aep/dm_game%02d.bin",
+        "/data/product/aep/gf_game%02d.bin",
+        "/data/product/aep/sp_gf_atkf%02d.bin",
+        "/data/product/aep/sp_ggm_ef%02d.bin",
+        "/data/product/aep/sp_ggm_efbg%02d.bin",
+        "/data/product/aep/sp_ggm_eflane%02d.bin",
+    ]
+
+    for i in range(0, 100):
+        for template in templates:
+            path = template % tuple(i for _ in range(template.count("%02d")))
+
+            if dumper.file_exists(path):
+                filenames.append(path)
+
+    templates = [
+        "/data/product/d3/model/mdl_gf_game%01d.bin",
+        "/data/product/d3/model/mdl_dm_game%01d.bin",
+        "/data/product/d3/model/mdl_gf_battle_common%01d.bin",
+
+        "/data/product/d3/model/tex_gf_game%01d.bin",
+        "/data/product/d3/model/tex_dm_game%01d.bin",
+        "/data/product/d3/model/tex_gf_battle_common%01d.bin",
+    ]
+
+    for i in range(0, 10):
+        for template in templates:
+            path = template % tuple(i for _ in range(template.count("%01d")))
+
+            if dumper.file_exists(path):
+                filenames.append(path)
+
+    for i in range(0, 100):
+        for j in range(0, 100):
+            for ext in ['va2', 'va3']:
+                paths = [
+                    "/data/product/music/system/gfv%d_v%02d.%s" % (i, j, ext),
+                    "/data/product/music/system/gf%d_v%02d.%s" % (i, j, ext),
+                    "/data/product/music/system/gfxg%d_v%02d.%s" % (i, j, ext),
+                    "/data/product/music/system/dmv%d_v%02d.%s" % (i, j, ext),
+                    "/data/product/music/system/dm%d_v%02d.%s" % (i, j, ext),
+                    "/data/product/music/system/dmxg%d_v%02d.%s" % (i, j, ext),
+                ]
+
+                for path in paths:
+                    if dumper.file_exists(path):
+                        filenames.append(path)
+
+        for ext in ['va2', 'va3']:
+            paths = [
+                "/data/product/music/system/gfv%d_se.%s" % (i, ext),
+                "/data/product/music/system/gfv_v%02d.%s" % (i, ext),
+                "/data/product/music/system/gf%d_se.%s" % (i, ext),
+                "/data/product/music/system/gf_v%02d.%s" % (i, ext),
+                "/data/product/music/system/gfxg%d_se.%s" % (i, ext),
+                "/data/product/music/system/gfxg_v%02d.%s" % (i, ext),
+                "/data/product/music/system/dmv%d_se.%s" % (i, ext),
+                "/data/product/music/system/dmv_v%02d.%s" % (i, ext),
+                "/data/product/music/system/dm%d_se.%s" % (i, ext),
+                "/data/product/music/system/dm_v%02d.%s" % (i, ext),
+                "/data/product/music/system/dmxg%d_se.%s" % (i, ext),
+                "/data/product/music/system/dmxg_v%02d.%s" % (i, ext),
+            ]
+
+            for path in paths:
+                if dumper.file_exists(path):
+                    filenames.append(path)
+
+    for filename in filenames:
+        if "gf_" in filename:
+            new_filename = filename.replace("gf_", "dm_")
+
+            if new_filename not in filenames and dumper.file_exists(new_filename):
+                filenames.append(new_filename)
+
+        elif "dm_" in filename:
+            new_filename = filename.replace("dm_", "gf_")
+
+            if new_filename not in filenames and dumper.file_exists(new_filename):
+                filenames.append(new_filename)
+
+        elif "_gf" in filename:
+            new_filename = filename.replace("_gf", "_dm")
+
+            if new_filename not in filenames and dumper.file_exists(new_filename):
+                filenames.append(new_filename)
+
+        elif "_dm" in filename:
+            new_filename = filename.replace("_dm", "_gf")
+
+            if new_filename not in filenames and dumper.file_exists(new_filename):
+                filenames.append(new_filename)
+
+        elif "tex_" in filename:
+            new_filename = filename.replace("tex_", "mdl_")
+
+            if new_filename not in filenames and dumper.file_exists(new_filename):
+                filenames.append(new_filename)
+
+            new_filename = filename.replace("d3/model/tex_", "aep/")
+
+            if new_filename not in filenames and dumper.file_exists(new_filename):
+                filenames.append(new_filename)
+
+        elif "mdl_" in filename:
+            new_filename = filename.replace("mdl_", "tex_")
+
+            if new_filename not in filenames and dumper.file_exists(new_filename):
+                filenames.append(new_filename)
+
+            new_filename = filename.replace("d3/model/mdl_", "aep/")
+
+            if new_filename not in filenames and dumper.file_exists(new_filename):
+                filenames.append(new_filename)
 
     return filenames
 
@@ -465,9 +1139,28 @@ if __name__ == "__main__":
 
     filenames = bruteforce_filenames(dumper)
 
-    for path in filenames:
-        if path.startswith('/'):
-            path = path[1:]
+    sorted_keys = sorted(dumper.entries, key=lambda x:(dumper.entries[x].get('packid', 0), dumper.entries[x].get('offset', 0)))
 
-        print("Extracting {}...".format(path))
-        dumper.extract_data(path, args.input, args.output)
+    named = 0
+
+    for k in sorted_keys:
+        if 'orig_filename' in dumper.entries[k]:
+            print("%-64s packid[%04d] offset[%08x] filesize[%08x] hash[%08x]" % (dumper.entries[k]['orig_filename'], dumper.entries[k]['packid'], dumper.entries[k]['offset'], dumper.entries[k]['filesize'], k))
+            dumper.extract_data(dumper.entries[k]['orig_filename'], args.input, args.output)
+            named += 1
+
+        else:
+            # print("Dumping %08x.bin" % k)
+
+            data = dumper.extract_data_mem(None, args.input, k)
+
+            output_path = os.path.join(args.output, "unknown")
+            os.makedirs(output_path, exist_ok=True)
+
+            output_filename = os.path.join(output_path, "%08x.bin" % k)
+            print("Dumping", output_filename)
+            open(output_filename, "wb").write(data)
+
+    print("Named: %d" % (named))
+    print("Unnamed: %d" % (len(sorted_keys) - named))
+    print("Total: %d" % (len(sorted_keys)))
